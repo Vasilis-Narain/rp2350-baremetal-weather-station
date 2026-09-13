@@ -2,19 +2,6 @@
 static i32 get_tp_params(bme280_calib_t *calib_params);
 static i32 get_hum_params(bme280_calib_t *calib_params);
 
-/*
-typedef struct {
-    u8 press_msb;
-    u8 press_lsb;
-    u8 press_xlsb;
-    u8 temp_msb;
-    u8 temp_lsb;
-    u8 temp_xlsb;
-    u8 hum_msb;
-    u8 hum_lsb;
-} bme280_raw_data_t;
-*/
-
 i32 bme280_start_read_raw_data(bme280_raw_data_t *raw_data) {
     if (i2c_start_bulk_read_async(BME280_REG_DATA_START, (u8 *)raw_data, BME280_LEN_P_T_H_DATA) != 0) {
         return I2C_BUS_BUSY;

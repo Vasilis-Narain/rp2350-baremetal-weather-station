@@ -43,10 +43,12 @@ void configure_systick(u8 cycles) {
     m33_hw->syst_csr = M33_SYST_CSR_TICKINT_BITS | M33_SYST_CSR_ENABLE_BITS;
 }
 
+static inline void delay(u32 ms_to_wait);
 static bme280_raw_data_t raw_data;
 static b32 bme280_is_configged = FALSE;
 volatile u32 ms = 0;
 volatile u32 next = 500;
+
 void SYSTICK_Handler() {
     ms++;
     if ((i32)(ms - next) >= 0) {
@@ -127,10 +129,7 @@ void main() {
     }
 
     // Delay for first conversion after setting normal mode.
-    u32 wait_until = ms + 20;
-    while ((i32)(ms - wait_until) < 0) {
-        WFI;
-    }
+    delay(20);
     bme280_is_configged = TRUE;
 
     u8 readback[4];
@@ -169,6 +168,13 @@ void main() {
             PANIC;
         }
         flush(rtt_writer);
+        WFI;
+    }
+}
+
+static inline void delay(u32 ms_to_wait) {
+    u32 wait_until = ms + ms_to_wait;
+    while ((i32)(ms - wait_until) < 0) {
         WFI;
     }
 }
