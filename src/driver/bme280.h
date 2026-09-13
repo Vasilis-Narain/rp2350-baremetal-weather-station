@@ -18,7 +18,7 @@
 // Oversampling settings: pressure x0, temperature x1, humidity x1
 // IIR filter settings: filter off
 #define BME280_DEFAULT_CTRL_MEAS ((BME280_OVERSAMPLING_1X << BME280_OSR_T_LSB) | \
-                                  (BME280_NO_OVERSAMPLING << BME280_OSR_P_LSB) | \
+                                  (BME280_OVERSAMPLING_1X << BME280_OSR_P_LSB) | \
                                   (BME280_POWERMODE_NORMAL << BME280_MODE_LSB))
 
 #define BME280_DEFAULT_CTRL_HUM (BME280_OVERSAMPLING_1X << BME280_OSR_H_LSB)
@@ -55,16 +55,37 @@ typedef struct {
     i8 dig_h6;
 } bme280_calib_t;
 
+typedef struct {
+    u8 config;
+    u8 ctrl_hum;
+    u8 ctrl_meas;
+} bme280_config_t;
+
+typedef struct {
+    u8 press_msb;
+    u8 press_lsb;
+    u8 press_xlsb;
+    u8 temp_msb;
+    u8 temp_lsb;
+    u8 temp_xlsb;
+    u8 hum_msb;
+    u8 hum_lsb;
+} bme280_raw_data_t;
+
+i32 bme280_start_read_raw_data(bme280_raw_data_t *raw_data);
+
 i32 bme280_get_calib_params(bme280_calib_t *calib_params);
+
+i32 bme280_set_config(const bme280_config_t settings);
 
 // returns temperature in DegC, resolution is 0.01 DegC.
 // Output value of "5123" equals 51.23 DegC
-i32 bme280_compensate_t(bme280_calib_t *calib, i32 adc_temp);
+i32 bme280_compensate_t(const bme280_calib_t *calib, const i32 adc_temp);
 
 // returns pressure in Pa as unsigned 32 bit integer.
 // Output value of "96386" equals 96386 Pa = 963.86 hPa
-u32 bme280_compensate_p(bme280_calib_t *calib, i32 adc_pressure);
+u32 bme280_compensate_p(const bme280_calib_t *calib, const i32 adc_pressure);
 
 // returns humidity in %RH as unsigned 32 bit integer in Q22.10 format (22 integer and 10 fractional bits).
 // Output value of "47445" represents 47445/1024 = 46.333 %RH
-u32 bme280_compensate_h(bme280_calib_t *calib, i32 adc_humidity);
+u32 bme280_compensate_h(const bme280_calib_t *calib, const i32 adc_humidity);

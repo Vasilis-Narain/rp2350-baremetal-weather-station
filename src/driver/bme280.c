@@ -2,6 +2,61 @@
 static i32 get_tp_params(bme280_calib_t *calib_params);
 static i32 get_hum_params(bme280_calib_t *calib_params);
 
+/*
+typedef struct {
+    u8 press_msb;
+    u8 press_lsb;
+    u8 press_xlsb;
+    u8 temp_msb;
+    u8 temp_lsb;
+    u8 temp_xlsb;
+    u8 hum_msb;
+    u8 hum_lsb;
+} bme280_raw_data_t;
+*/
+
+i32 bme280_start_read_raw_data(bme280_raw_data_t *raw_data) {
+    if (i2c_start_bulk_read_async(BME280_REG_DATA_START, (u8 *)raw_data, BME280_LEN_P_T_H_DATA) != 0) {
+        return I2C_BUS_BUSY;
+    }
+    return 0;
+}
+
+i32 bme280_set_config(const bme280_config_t settings) {
+    u8 config_addresses[] = {
+        BME280_REG_CONFIG,
+        BME280_REG_CTRL_HUM,
+        BME280_REG_CTRL_MEAS,
+    };
+
+    u8 config_data[] = {
+        settings.config,
+        settings.ctrl_hum,
+        settings.ctrl_meas,
+    };
+
+    i2c_address_data_pair_array data_pairs = {
+        .addresses = config_addresses,
+        .data = config_data,
+        .capacity = 3,
+    };
+
+    if (i2c_start_bulk_write_async(&data_pairs) == 0) {
+        while (i2c1_state == I2C_WRITING) {
+            WFI;
+        }
+        BARRIER;
+        if (i2c1_state == I2C_ERROR) {
+            return (i32)i2c_get_fault();
+        }
+        i2c1_state = I2C_IDLE;
+    } else {
+        return I2C_BUS_BUSY;
+    }
+
+    return 0;
+}
+
 // blocking function to get calib data
 i32 bme280_get_calib_params(bme280_calib_t *calib_params) {
     i32 tp_err = get_tp_params(calib_params);
@@ -66,7 +121,7 @@ static i32 t_fine;
 
 // returns temperature in DegC, resolution is 0.01 DegC.
 // Output value of "5123" equals 51.23 DegC
-i32 bme280_compensate_t(bme280_calib_t *calib, i32 adc_temp) {
+i32 bme280_compensate_t(const bme280_calib_t *calib, const i32 adc_temp) {
     i32 var1, var2, temp;
 
     var1 = ((((adc_temp >> 3) - ((i32)calib->dig_t1 << 1))) * ((i32)calib->dig_t2)) >> 11;
@@ -80,7 +135,7 @@ i32 bme280_compensate_t(bme280_calib_t *calib, i32 adc_temp) {
 
 // returns pressure in Pa as unsigned 32 bit integer.
 // Output value of "96386" equals 96386 Pa = 963.86 hPa
-u32 bme280_compensate_p(bme280_calib_t *calib, i32 adc_p) {
+u32 bme280_compensate_p(const bme280_calib_t *calib, const i32 adc_p) {
     i32 var1, var2;
     u32 p;
 
@@ -113,7 +168,7 @@ u32 bme280_compensate_p(bme280_calib_t *calib, i32 adc_p) {
 
 // returns humidity in %RH as unsigned 32 bit integer in Q22.10 format (22 integer and 10 fractional bits).
 // Output value of "47445" represents 47445/1024 = 46.333 %RH
-u32 bme280_compensate_h(bme280_calib_t *calib, i32 adc_h) {
+u32 bme280_compensate_h(const bme280_calib_t *calib, const i32 adc_h) {
     i32 v_x1_u32r;
 
     v_x1_u32r = (t_fine - ((i32)76800));

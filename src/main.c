@@ -27,9 +27,6 @@
 // DEBUG: storm guard snapshot from i2c_state_machine.c
 extern volatile u32 dbg_isr_hits, dbg_intr_stat, dbg_intr_mask, dbg_rxflr, dbg_txflr, dbg_state;
 
-extern void _DEFAULT_Handler();
-#define PANIC _DEFAULT_Handler()
-
 /* clk_sys must already be configured. Usually done in `crt0`*/
 void configure_systick(u8 cycles) {
     ticks_hw->ticks[TICK_PROC0].cycles = cycles;
@@ -46,6 +43,8 @@ void configure_systick(u8 cycles) {
     m33_hw->syst_csr = M33_SYST_CSR_TICKINT_BITS | M33_SYST_CSR_ENABLE_BITS;
 }
 
+static bme280_raw_data_t raw_data;
+static b32 bme280_is_configged = FALSE;
 volatile u32 ms = 0;
 volatile u32 next = 500;
 void SYSTICK_Handler() {
@@ -53,6 +52,9 @@ void SYSTICK_Handler() {
     if ((i32)(ms - next) >= 0) {
         next += 500;
         sio_hw->gpio_togl = 1 << PIN25;
+        if (bme280_is_configged) {
+            bme280_start_read_raw_data(&raw_data);
+        }
     }
 }
 
@@ -62,7 +64,6 @@ void resets_clear(u32 mask) {
 }
 
 void main() {
-
     char writer_buf[RTT_WRITER_MAX_BUFFER_SIZE];
     Writer rtt_writer_instance;
     Writer *rtt_writer = &rtt_writer_instance;
@@ -100,49 +101,37 @@ void main() {
         PANIC;
     }
 
-    write_all(rtt_writer, "\n...printing tp_params:\n");
+    write_all(rtt_writer, "\nPrinting tp_params:\n");
     u16 *tmp = (u16 *)&calib_params;
     for (u8 i = 0; i < 12; i++) {
         if (i == 0 || i == 3) {
-            print(rtt_writer, "param {d}: {u:s}\n", i, *tmp++);
+            print(rtt_writer, "  param {d}: {u:xs}\n", i, *tmp++);
         } else {
-            print(rtt_writer, "param {d}: {d:s}\n", i, *tmp++);
+            print(rtt_writer, "  param {d}: {u:xs}\n", i, *tmp++);
         }
     }
     flush(rtt_writer);
 
-    // Testing write config async
-    u8 config_addresses[] = {
-        BME280_REG_CONFIG,
-        BME280_REG_CTRL_HUM,
-        BME280_REG_CTRL_MEAS,
+    bme280_config_t config_data = {
+        .config = BME280_DEFAULT_CONFIG,
+        .ctrl_hum = BME280_DEFAULT_CTRL_HUM,
+        .ctrl_meas = BME280_DEFAULT_CTRL_MEAS,
     };
 
-    u8 config_data[] = {
-        BME280_DEFAULT_CONFIG,
-        BME280_DEFAULT_CTRL_HUM,
-        BME280_DEFAULT_CTRL_MEAS,
-    };
+    i32 config_error = bme280_set_config(config_data);
 
-    i2c_address_data_pair_array data_pairs = {
-        .addresses = config_addresses,
-        .data = config_data,
-        .capacity = 3,
-    };
-
-    i2c_start_bulk_write_async(&data_pairs);
-    while (i2c1_state == I2C_WRITING) {
-        WFI;
-    }
-    BARRIER;
-    if (i2c1_state == I2C_ERROR) {
-        print(rtt_writer, "write err fault={u:x} abrt={u:x}\n", i2c_get_fault(), i2c_get_abrt_source());
-        print(rtt_writer, "hits={u} stat={u:x} mask={u:x}\n", dbg_isr_hits, dbg_intr_stat, dbg_intr_mask);
-        print(rtt_writer, "state={u} rxflr={u} txflr={u}\n", dbg_state, dbg_rxflr, dbg_txflr);
+    if (config_error != 0) {
+        print(rtt_writer, "set_config error: {d}\n", config_error);
         flush(rtt_writer);
         PANIC;
     }
-    i2c1_state = I2C_IDLE;
+
+    // Delay for first conversion after setting normal mode.
+    u32 wait_until = ms + 20;
+    while ((i32)(ms - wait_until) < 0) {
+        WFI;
+    }
+    bme280_is_configged = TRUE;
 
     u8 readback[4];
     i2c_start_bulk_read_async(BME280_REG_CTRL_HUM, readback, 4); //0xf2..0xf5
@@ -151,14 +140,35 @@ void main() {
     }
     BARRIER;
     i2c1_state = I2C_IDLE;
-    print(rtt_writer, "\nhum={u:xb} meas={u:xb} cfg={u:xb}\n", readback[0], readback[2], readback[3]);
+    write_all(rtt_writer, "\nPrinting config readout:\n");
+    print(rtt_writer, "  hum={u:xb}\n  meas={u:xb}\n  cfg={u:xb}\n", readback[0], readback[2], readback[3]);
 
-    write_all(rtt_writer, "\nSETUP SUCCESS!\n");
+    write_all(rtt_writer, "\nSETUP SUCCESS!\n\n");
 
     // dont forget to flush :D
     flush(rtt_writer);
 
     for (;;) {
+        if (i2c1_state == I2C_DONE) {
+            i2c1_state = I2C_IDLE;
+            i32 adc_temp = (i32)((raw_data.temp_msb << 12) | (raw_data.temp_lsb << 4) | (raw_data.temp_xlsb >> 4));
+            i32 adc_press = (i32)((raw_data.press_msb << 12) | (raw_data.press_lsb << 4) | (raw_data.press_xlsb >> 4));
+            i32 adc_hum = (i32)((raw_data.hum_msb << 8) | (raw_data.hum_lsb));
+
+            i32 temp = bme280_compensate_t(&calib_params, adc_temp);
+            i32 press = bme280_compensate_p(&calib_params, adc_press);
+            i32 hum = bme280_compensate_h(&calib_params, adc_hum);
+
+            print(rtt_writer, "\x1B[1A\rreadout: temp: {d}, press: {d}, hum: {d}\n", temp, press, hum);
+        } else if (i2c1_state == I2C_ERROR) {
+            i2c1_state = I2C_IDLE;
+            print(rtt_writer, "write err fault={u:x} abrt={u:x}\n", i2c_get_fault(), i2c_get_abrt_source());
+            print(rtt_writer, "hits={u} stat={u:x} mask={u:x}\n", dbg_isr_hits, dbg_intr_stat, dbg_intr_mask);
+            print(rtt_writer, "state={u} rxflr={u} txflr={u}\n", dbg_state, dbg_rxflr, dbg_txflr);
+            flush(rtt_writer);
+            PANIC;
+        }
+        flush(rtt_writer);
         WFI;
     }
 }
