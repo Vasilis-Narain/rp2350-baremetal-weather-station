@@ -65,10 +65,6 @@ void resets_clear(u32 mask) {
     hw_clear_bits(&resets_hw->reset, mask);
     while ((resets_hw->reset_done & mask) != mask) {}
 }
-#define ANSI_RETURN_CARRIAGE "\x1b[1a\r"
-#define ANSI_RED "\x1b[31m"
-#define ANSI_GREEN "\x1b[32m"
-#define ANSI_CLEAR "\x1b[0m"
 
 void main() {
     char writer_buf[RTT_WRITER_MAX_BUFFER_SIZE];
@@ -135,9 +131,9 @@ void main() {
     i2c1_state = I2C_IDLE;
 
     if (readback[0] == config_data.ctrl_hum && readback[2] == config_data.ctrl_meas && readback[3] == config_data.config) {
-        print(rtt_writer, "SETUP {s}OK{s}\n\n\n", LITERAL(ANSI_GREEN), LITERAL(ANSI_CLEAR));
+        write_all(rtt_writer, "SETUP " ANSI_GREEN "OK" ANSI_CLEAR "\n\n\n");
     } else {
-        print(rtt_writer, "SETUP {s}FAILED{s}\n", LITERAL(ANSI_RED), LITERAL(ANSI_CLEAR));
+        write_all(rtt_writer, "SETUP " ANSI_RED "FAILED" ANSI_CLEAR "\n");
         write_all(rtt_writer, "  Printing config readout:\n");
         print(rtt_writer, "    hum={u:xb}\n    meas={u:xb}\n    cfg={u:xb}\n\n", readback[0], readback[2], readback[3]);
         flush(rtt_writer);
@@ -151,7 +147,7 @@ void main() {
         if (i2c1_state == I2C_DONE) {
             bme280_final_data data = bme280_compensate_data(&calib_params, &raw_data);
             i2c1_state = I2C_IDLE;
-            print(rtt_writer, "\x1B[1A\rreadout: temp: {d}, press: {d}, hum: {d}\n", data.temp, data.press, data.hum);
+            print(rtt_writer, ANSI_RETURN_CARRIAGE "readout: temp: {d}, press: {d}, hum: {d}\n", data.temp, data.press, data.hum);
 
         } else if (i2c1_state == I2C_ERROR) {
             print(rtt_writer, "write err fault={u:x} abrt={u:x}\n", i2c_get_fault(), i2c_get_abrt_source());

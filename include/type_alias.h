@@ -1,6 +1,11 @@
 #pragma once
 #include <stdint.h>
 
+#define ANSI_RETURN_CARRIAGE "\x1B[0A\r"
+#define ANSI_RED "\x1b[31m"
+#define ANSI_GREEN "\x1b[32m"
+#define ANSI_CLEAR "\x1b[0m"
+
 typedef __SIZE_TYPE__ usize;
 
 typedef uint8_t u8;
