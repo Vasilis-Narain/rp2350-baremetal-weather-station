@@ -78,7 +78,7 @@ void i2c_init_master() {
 
 volatile i2c_state i2c1_state = I2C_IDLE;
 typedef struct {
-    u8 *buf;
+    volatile u8 *buf;
     u8 *write_registers;
     b32 write_is_data;
     u32 issued;
@@ -128,7 +128,7 @@ volatile u32 dbg_rxflr;
 volatile u32 dbg_txflr;
 volatile u32 dbg_state;
 
-b32 i2c_start_bulk_read_async(u8 reg_addr, u8 *buf, u32 len) {
+b32 i2c_start_bulk_read_async(u8 reg_addr, volatile u8 *buf, u32 len) {
     if (i2c1_state != I2C_IDLE) {
         return I2C_BUS_BUSY;
     }

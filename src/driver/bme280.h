@@ -72,11 +72,20 @@ typedef struct {
     u8 hum_lsb;
 } bme280_raw_data_t;
 
-i32 bme280_start_read_raw_data(bme280_raw_data_t *raw_data);
+typedef struct {
+    i32 temp;
+    u32 press;
+    u32 hum;
+} bme280_final_data;
+
+i32 bme280_start_read_raw_data(volatile bme280_raw_data_t *raw_data);
 
 i32 bme280_get_calib_params(bme280_calib_t *calib_params);
 
-i32 bme280_set_config(const bme280_config_t settings);
+i32 bme280_set_config(bme280_config_t settings);
+
+// Returns struct holding compensated values.
+bme280_final_data bme280_compensate_data(const bme280_calib_t *calib_params, const volatile bme280_raw_data_t *raw_data);
 
 // returns temperature in DegC, resolution is 0.01 DegC.
 // Output value of "5123" equals 51.23 DegC

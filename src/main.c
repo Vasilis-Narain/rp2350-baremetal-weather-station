@@ -44,7 +44,8 @@ void configure_systick(u8 cycles) {
 }
 
 static inline void delay(u32 ms_to_wait);
-static bme280_raw_data_t raw_data;
+
+static volatile bme280_raw_data_t raw_data;
 static b32 bme280_is_configged = FALSE;
 volatile u32 ms = 0;
 volatile u32 next = 500;
@@ -149,22 +150,16 @@ void main() {
 
     for (;;) {
         if (i2c1_state == I2C_DONE) {
+            bme280_final_data data = bme280_compensate_data(&calib_params, &raw_data);
             i2c1_state = I2C_IDLE;
-            i32 adc_temp = (i32)((raw_data.temp_msb << 12) | (raw_data.temp_lsb << 4) | (raw_data.temp_xlsb >> 4));
-            i32 adc_press = (i32)((raw_data.press_msb << 12) | (raw_data.press_lsb << 4) | (raw_data.press_xlsb >> 4));
-            i32 adc_hum = (i32)((raw_data.hum_msb << 8) | (raw_data.hum_lsb));
+            print(rtt_writer, "\x1B[1A\rreadout: temp: {d}, press: {d}, hum: {d}\n", data.temp, data.press, data.hum);
 
-            i32 temp = bme280_compensate_t(&calib_params, adc_temp);
-            i32 press = bme280_compensate_p(&calib_params, adc_press);
-            i32 hum = bme280_compensate_h(&calib_params, adc_hum);
-
-            print(rtt_writer, "\x1B[1A\rreadout: temp: {d}, press: {d}, hum: {d}\n", temp, press, hum);
         } else if (i2c1_state == I2C_ERROR) {
-            i2c1_state = I2C_IDLE;
             print(rtt_writer, "write err fault={u:x} abrt={u:x}\n", i2c_get_fault(), i2c_get_abrt_source());
             print(rtt_writer, "hits={u} stat={u:x} mask={u:x}\n", dbg_isr_hits, dbg_intr_stat, dbg_intr_mask);
             print(rtt_writer, "state={u} rxflr={u} txflr={u}\n", dbg_state, dbg_rxflr, dbg_txflr);
             flush(rtt_writer);
+            i2c1_state = I2C_IDLE;
             PANIC;
         }
         flush(rtt_writer);

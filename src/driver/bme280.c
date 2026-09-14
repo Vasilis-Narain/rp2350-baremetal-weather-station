@@ -2,14 +2,30 @@
 static i32 get_tp_params(bme280_calib_t *calib_params);
 static i32 get_hum_params(bme280_calib_t *calib_params);
 
-i32 bme280_start_read_raw_data(bme280_raw_data_t *raw_data) {
-    if (i2c_start_bulk_read_async(BME280_REG_DATA_START, (u8 *)raw_data, BME280_LEN_P_T_H_DATA) != 0) {
+bme280_final_data bme280_compensate_data(const bme280_calib_t *calib_params, const volatile bme280_raw_data_t *raw_data) {
+    i32 adc_temp = (i32)((raw_data->temp_msb << 12) | (raw_data->temp_lsb << 4) | (raw_data->temp_xlsb >> 4));
+    i32 adc_press = (i32)((raw_data->press_msb << 12) | (raw_data->press_lsb << 4) | (raw_data->press_xlsb >> 4));
+    i32 adc_hum = (i32)((raw_data->hum_msb << 8) | (raw_data->hum_lsb));
+
+    i32 temp = bme280_compensate_t(calib_params, adc_temp);
+    i32 press = bme280_compensate_p(calib_params, adc_press);
+    i32 hum = bme280_compensate_h(calib_params, adc_hum);
+
+    return (bme280_final_data){
+        .temp = temp,
+        .press = press,
+        .hum = hum,
+    };
+}
+
+i32 bme280_start_read_raw_data(volatile bme280_raw_data_t *raw_data) {
+    if (i2c_start_bulk_read_async(BME280_REG_DATA_START, (volatile u8 *)raw_data, BME280_LEN_P_T_H_DATA) != 0) {
         return I2C_BUS_BUSY;
     }
     return 0;
 }
 
-i32 bme280_set_config(const bme280_config_t settings) {
+i32 bme280_set_config(bme280_config_t settings) {
     u8 config_addresses[] = {
         BME280_REG_CONFIG,
         BME280_REG_CTRL_HUM,
