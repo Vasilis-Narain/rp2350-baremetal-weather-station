@@ -42,5 +42,5 @@ usize strlen(const char *str);                      // optionally provide own im
 
 #define WFI __asm__ volatile("WFI")
 #define BARRIER __asm__ volatile("" ::: "memory")
-extern void _DEFAULT_Handler();
-#define PANIC _DEFAULT_Handler()
+extern __attribute__((noreturn)) void panic();
+#define PANIC panic()

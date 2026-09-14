@@ -65,6 +65,10 @@ void resets_clear(u32 mask) {
     hw_clear_bits(&resets_hw->reset, mask);
     while ((resets_hw->reset_done & mask) != mask) {}
 }
+#define ANSI_RETURN_CARRIAGE "\x1b[1a\r"
+#define ANSI_RED "\x1b[31m"
+#define ANSI_GREEN "\x1b[32m"
+#define ANSI_CLEAR "\x1b[0m"
 
 void main() {
     char writer_buf[RTT_WRITER_MAX_BUFFER_SIZE];
@@ -91,7 +95,7 @@ void main() {
     // clk_sys must be configured before calling this function.
     configure_systick(SYST_CYCLES);
 
-    write_all(rtt_writer, "\nRTT OK\n");
+    print(rtt_writer, "\nRTT   {s}OK{s}\n", LITERAL(ANSI_GREEN), LITERAL(ANSI_CLEAR));
     i2c_init_master();
     i2c_irq_enable(I2C1);
 
@@ -103,17 +107,6 @@ void main() {
         flush(rtt_writer);
         PANIC;
     }
-
-    write_all(rtt_writer, "\nPrinting tp_params:\n");
-    u16 *tmp = (u16 *)&calib_params;
-    for (u8 i = 0; i < 12; i++) {
-        if (i == 0 || i == 3) {
-            print(rtt_writer, "  param {d}: {u:xs}\n", i, *tmp++);
-        } else {
-            print(rtt_writer, "  param {d}: {u:xs}\n", i, *tmp++);
-        }
-    }
-    flush(rtt_writer);
 
     bme280_config_t config_data = {
         .config = BME280_DEFAULT_CONFIG,
@@ -140,10 +133,16 @@ void main() {
     }
     BARRIER;
     i2c1_state = I2C_IDLE;
-    write_all(rtt_writer, "\nPrinting config readout:\n");
-    print(rtt_writer, "  hum={u:xb}\n  meas={u:xb}\n  cfg={u:xb}\n", readback[0], readback[2], readback[3]);
 
-    write_all(rtt_writer, "\nSETUP SUCCESS!\n\n");
+    if (readback[0] == config_data.ctrl_hum && readback[2] == config_data.ctrl_meas && readback[3] == config_data.config) {
+        print(rtt_writer, "SETUP {s}OK{s}\n\n\n", LITERAL(ANSI_GREEN), LITERAL(ANSI_CLEAR));
+    } else {
+        print(rtt_writer, "SETUP {s}FAILED{s}\n", LITERAL(ANSI_RED), LITERAL(ANSI_CLEAR));
+        write_all(rtt_writer, "  Printing config readout:\n");
+        print(rtt_writer, "    hum={u:xb}\n    meas={u:xb}\n    cfg={u:xb}\n\n", readback[0], readback[2], readback[3]);
+        flush(rtt_writer);
+        PANIC;
+    }
 
     // dont forget to flush :D
     flush(rtt_writer);

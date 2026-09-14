@@ -17,7 +17,7 @@ static void _enable_fpu();
 
 extern void main();
 
-void _crt0() {
+__attribute__((noreturn)) void _crt0() {
     _config_sys_clock();
     _config_ref_clock();
     _enable_fpu();

@@ -19,12 +19,9 @@ static i32 print_uint_dec(Writer *writer, u32 num);
 static char next(const char **fmt, const char *end);
 static u32 unsigned_trunc(int_size size, u32 num);
 
-extern __attribute__((noreturn)) void _DEFAULT_Handler();
-#define ERROR_HANDLER() _DEFAULT_Handler()
-
 void writer_init(Writer *writer, char *buf, u32 capacity, void (*flush_fn)(Writer *)) {
     if (!writer || !buf || !capacity || !flush_fn) {
-        ERROR_HANDLER();
+        PANIC;
     }
     writer->buf = buf;
     writer->capacity = capacity;
@@ -34,7 +31,7 @@ void writer_init(Writer *writer, char *buf, u32 capacity, void (*flush_fn)(Write
 
 void flush(Writer *writer) {
     if (!writer || !writer->buf || !writer->capacity || !writer->flush_fn) {
-        ERROR_HANDLER();
+        PANIC;
     }
     writer->flush_fn(writer);
     writer->current_size = 0;
@@ -78,24 +75,24 @@ i32 writer_print(Writer *writer, const char *fmt, u32 length, ...) {
 
             if (c == 's') { // This is the preferred path. Use LITERAL("hello daddy") or STRING(ptr, length) macros
                 if (next(&fmt, end) != '}') {
-                    ERROR_HANDLER();
+                    PANIC;
                 }
 
                 String str = va_arg(args, String);
                 i32 bytes = writer_write(writer, str.ptr, str.len);
                 if (bytes < 0) {
-                    ERROR_HANDLER();
+                    PANIC;
                 }
                 bytes_printed += bytes;
 
             } else if (c == 'z') { // for c strings. We(I) don't like these.
                 if (next(&fmt, end) != '}') {
-                    ERROR_HANDLER();
+                    PANIC;
                 }
                 char *str = va_arg(args, char *);
                 i32 bytes = writer_write(writer, str, strlen(str));
                 if (bytes < 0) {
-                    ERROR_HANDLER();
+                    PANIC;
                 }
                 bytes_printed += bytes;
             } else {
@@ -107,7 +104,7 @@ i32 writer_print(Writer *writer, const char *fmt, u32 length, ...) {
                 } else if (c == 'u') {
                     sign = UNSIGNED;
                 } else {
-                    ERROR_HANDLER();
+                    PANIC;
                 }
 
                 c = next(&fmt, end);
@@ -126,11 +123,11 @@ i32 writer_print(Writer *writer, const char *fmt, u32 length, ...) {
                         size = HALF;
                         c = next(&fmt, end);
                     } else {
-                        ERROR_HANDLER();
+                        PANIC;
                     }
                 }
                 if (c != '}') {
-                    ERROR_HANDLER();
+                    PANIC;
                 }
 
                 switch (fmt_type) {
@@ -143,7 +140,7 @@ i32 writer_print(Writer *writer, const char *fmt, u32 length, ...) {
                         }
                         i32 bytes = print_uint_dec(writer, num);
                         if (bytes < 0) {
-                            ERROR_HANDLER();
+                            PANIC;
                         }
                         bytes_printed += bytes;
                         break;
@@ -155,7 +152,7 @@ i32 writer_print(Writer *writer, const char *fmt, u32 length, ...) {
                         }
                         i32 bytes = print_int_dec(writer, num);
                         if (bytes < 0) {
-                            ERROR_HANDLER();
+                            PANIC;
                         }
                         bytes_printed += bytes;
                         break;
@@ -166,7 +163,7 @@ i32 writer_print(Writer *writer, const char *fmt, u32 length, ...) {
                     u32 num = va_arg(args, u32);
                     i32 bytes = print_int_hex(writer, size, num);
                     if (bytes < 0) {
-                        ERROR_HANDLER();
+                        PANIC;
                     }
                     bytes_printed += bytes;
                     break;

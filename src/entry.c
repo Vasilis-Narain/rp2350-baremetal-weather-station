@@ -1,21 +1,35 @@
 #include <type_alias.h>
 #include <hardware/regs/resets.h>
 #include <hardware/structs/resets.h>
+#include <hardware/structs/m33.h>
 
 extern void __stack_top();
-extern void _crt0();
+extern __attribute__((noreturn)) void _crt0();
 
-void _RESET_Handler() {
+__attribute__((noreturn)) void _RESET_Handler() {
     _crt0();
 }
 
-void _DEFAULT_Handler() {
-    // Throw all peripherals into reset
-    resets_hw->reset = RESETS_RESET_RESET;
-    __asm__ volatile("CPSID I");
-    for (;;)
-        __asm__ volatile("WFI"); // try to sleep forever
+__attribute__((noreturn)) void panic() {
+    __asm__ volatile("cpsid i");
+
+    // Throw i2c busses into reset
+    hw_set_bits(&resets_hw->reset, RESETS_RESET_I2C0_BITS | RESETS_RESET_I2C1_BITS);
+
+    //if debugger attached halt here
+    if (m33_hw->dhcsr & M33_DHCSR_C_DEBUGEN_BITS) {
+        __asm__ volatile("bkpt #0");
+    }
+
+    for (;;) {
+        __asm__ volatile("nop");
+    }
 }
+
+void _DEFAULT_Handler() {
+    panic();
+}
+
 void __attribute__((weak, alias("_DEFAULT_Handler"))) NMI_Handler();
 void __attribute__((weak, alias("_DEFAULT_Handler"))) SYSTICK_Handler();
 void __attribute__((weak, alias("_DEFAULT_Handler"))) SVC_Handler();

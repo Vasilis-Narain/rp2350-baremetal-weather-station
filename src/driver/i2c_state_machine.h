@@ -46,11 +46,9 @@
                       I2C_IC_CON_IC_RESTART_EN_BITS |                           \
                       I2C_IC_CON_IC_SLAVE_DISABLE_BITS)
 
-#define PADS_I2C_CLEAR (PADS_BANK0_GPIO0_ISO_BITS | \
-                        PADS_BANK0_GPIO0_PDE_BITS | \
-                        PADS_BANK0_GPIO0_PUE_BITS)
+#define PADS_I2C_CLEAR (PADS_BANK0_GPIO0_ISO_BITS | PADS_BANK0_GPIO0_PDE_BITS)
 
-#define PADS_I2C_SET (PADS_BANK0_GPIO0_IE_BITS)
+#define PADS_I2C_SET (PADS_BANK0_GPIO0_IE_BITS | PADS_BANK0_GPIO0_PUE_BITS)
 
 // Fault error codes
 #define I2C_FAULT_ABORT (1u << 0)
