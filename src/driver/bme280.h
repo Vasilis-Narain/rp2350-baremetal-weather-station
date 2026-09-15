@@ -78,6 +78,8 @@ typedef struct {
     u32 hum;
 } bme280_final_data;
 
+void bme280_set_lane(i2c_lane_t bus_lane);
+
 i32 bme280_start_read_raw_data(volatile bme280_raw_data_t *raw_data);
 
 i32 bme280_get_calib_params(bme280_calib_t *calib_params);

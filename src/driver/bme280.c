@@ -2,6 +2,12 @@
 static i32 get_tp_params(bme280_calib_t *calib_params);
 static i32 get_hum_params(bme280_calib_t *calib_params);
 
+static i2c_lane_t lane;
+
+void bme280_set_lane(i2c_lane_t bus_lane) {
+    lane = bus_lane;
+}
+
 bme280_final_data bme280_compensate_data(const bme280_calib_t *calib_params, const volatile bme280_raw_data_t *raw_data) {
     i32 adc_temp = (i32)((raw_data->temp_msb << 12) | (raw_data->temp_lsb << 4) | (raw_data->temp_xlsb >> 4));
     i32 adc_press = (i32)((raw_data->press_msb << 12) | (raw_data->press_lsb << 4) | (raw_data->press_xlsb >> 4));
@@ -19,7 +25,7 @@ bme280_final_data bme280_compensate_data(const bme280_calib_t *calib_params, con
 }
 
 i32 bme280_start_read_raw_data(volatile bme280_raw_data_t *raw_data) {
-    if (i2c_start_bulk_read_async(BME280_REG_DATA_START, (volatile u8 *)raw_data, BME280_LEN_P_T_H_DATA) != 0) {
+    if (i2c_start_bulk_read_async(lane, BME280_I2C_ADDR_PRIM, BME280_REG_DATA_START, (volatile u8 *)raw_data, BME280_LEN_P_T_H_DATA) != 0) {
         return I2C_BUS_BUSY;
     }
     return 0;
@@ -44,20 +50,11 @@ i32 bme280_set_config(bme280_config_t settings) {
         .capacity = 3,
     };
 
-    if (i2c_start_bulk_write_async(&data_pairs) == 0) {
-        while (i2c1_state == I2C_WRITING) {
-            WFI;
-        }
-        BARRIER;
-        if (i2c1_state == I2C_ERROR) {
-            return (i32)i2c_get_fault();
-        }
-        i2c1_state = I2C_IDLE;
-    } else {
+    if (i2c_start_bulk_write_async(lane, BME280_I2C_ADDR_PRIM, &data_pairs)) {
         return I2C_BUS_BUSY;
     }
 
-    return 0;
+    return i2c_wait_completion(lane);
 }
 
 // blocking function to get calib data
@@ -74,46 +71,31 @@ i32 bme280_get_calib_params(bme280_calib_t *calib_params) {
 }
 
 static i32 get_tp_params(bme280_calib_t *calib_params) {
-    if (i2c_start_bulk_read_async(BME280_REG_TEMP_PRESS_CALIB_DATA_START, (u8 *)calib_params, BME280_LEN_TEMP_PRESS_CALIB_DATA) == 0) {
-        while (i2c1_state == I2C_READING) {
-            WFI;
-        }
-        BARRIER;
-
-        if (i2c1_state != I2C_DONE) {
-            return (i32)i2c_get_fault();
-        }
-        i2c1_state = I2C_IDLE;
-    } else {
+    if (i2c_start_bulk_read_async(lane, BME280_I2C_ADDR_PRIM, BME280_REG_TEMP_PRESS_CALIB_DATA_START, (u8 *)calib_params, BME280_LEN_TEMP_PRESS_CALIB_DATA)) {
         return I2C_BUS_BUSY;
     }
-    return 0;
+    return i2c_wait_completion(lane);
 }
 
 static i32 get_hum_params(bme280_calib_t *calib_params) {
     u8 buf[BME280_LEN_HUMIDITY_CALIB_DATA];
 
-    if (i2c_start_bulk_read_async(BME280_REG_HUMIDITY_CALIB_DATA, buf, BME280_LEN_HUMIDITY_CALIB_DATA) == 0) {
-        while (i2c1_state == I2C_READING) {
-            WFI;
-        }
-        BARRIER;
-
-        if (i2c1_state != I2C_DONE) {
-            return (i32)i2c_get_fault();
-        }
-        i2c1_state = I2C_IDLE;
-
-        calib_params->dig_h2 = COMBINE_I16(buf[0], buf[1]);
-        calib_params->dig_h3 = buf[2];
-
-        calib_params->dig_h4 = ((i16)(i8)buf[3] * 16) | (buf[4] & 0x0F);
-        calib_params->dig_h5 = ((i16)(i8)buf[5] * 16) | (buf[4] >> 4);
-
-        calib_params->dig_h6 = (i8)buf[6];
-    } else {
+    if (i2c_start_bulk_read_async(lane, BME280_I2C_ADDR_PRIM, BME280_REG_HUMIDITY_CALIB_DATA, buf, BME280_LEN_HUMIDITY_CALIB_DATA)) {
         return I2C_BUS_BUSY;
     }
+
+    i32 err = i2c_wait_completion(lane);
+    if (err != 0) {
+        return err;
+    }
+
+    calib_params->dig_h2 = COMBINE_I16(buf[0], buf[1]);
+    calib_params->dig_h3 = buf[2];
+
+    calib_params->dig_h4 = ((i16)(i8)buf[3] * 16) | (buf[4] & 0x0F);
+    calib_params->dig_h5 = ((i16)(i8)buf[5] * 16) | (buf[4] >> 4);
+
+    calib_params->dig_h6 = (i8)buf[6];
     return 0;
 }
 

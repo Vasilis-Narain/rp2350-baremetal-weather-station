@@ -13,9 +13,6 @@ __attribute__((noreturn)) void _RESET_Handler() {
 __attribute__((noreturn)) void panic() {
     __asm__ volatile("cpsid i");
 
-    // Throw i2c busses into reset
-    hw_set_bits(&resets_hw->reset, RESETS_RESET_I2C0_BITS | RESETS_RESET_I2C1_BITS);
-
     //if debugger attached halt here
     if (m33_hw->dhcsr & M33_DHCSR_C_DEBUGEN_BITS) {
         __asm__ volatile("bkpt #0");

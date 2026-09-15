@@ -49,3 +49,5 @@ usize strlen(const char *str);                      // optionally provide own im
 #define BARRIER __asm__ volatile("" ::: "memory")
 extern __attribute__((noreturn)) void panic();
 #define PANIC panic()
+
+#define I2C_DEBUG 1 // 0 for off

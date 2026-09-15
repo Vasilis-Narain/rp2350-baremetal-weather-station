@@ -1,4 +1,5 @@
 #include "i2c_state_machine.h"
+#include "../Writer.h"
 /*
     * Interrupt notes:
     *  Use NVIC_ISER to set/read enabled state of interrupts.
@@ -35,84 +36,129 @@
  * RX_UNDER -> processor attempts to read receive buffer when empty
  *
 */
-static void pump_tx_write();
-static void pump_tx_read();
-static void drain_rx();
-static void clear_rx();
+extern void resets_clear(u32 mask);
+static void pump_tx_write(i2c_bus *bus);
+static void pump_tx_read(i2c_bus *bus);
+static void drain_rx(i2c_bus *bus);
+static void clear_rx(i2c_bus *bus);
 
-//NOTE(vasilis): these are the I2C interrupt handlers:
-//void __attribute__((weak, alias("_DEFAULT_Handler"))) I2C0_IRQ_Handler();
-//void __attribute__((weak, alias("_DEFAULT_Handler"))) I2C1_IRQ_Handler();
+static i2c_bus buses[] = {
+    [I2C0] = {.hw = i2c0_hw, .last_tar = ~0},
+    [I2C1] = {.hw = i2c1_hw, .last_tar = ~0},
+};
+
+static inline b32 i2c_is_cfg_valid(i2c_config *cfg) {
+
+    if (((cfg->sda_pin % 4) == 0) && (((cfg->scl_pin - 1) % 4) == 0)) {
+        cfg->lane = I2C0;
+        return TRUE;
+    }
+
+    if ((((cfg->sda_pin - 2) % 4) == 0) && (((cfg->scl_pin - 3) % 4) == 0)) {
+        cfg->lane = I2C1;
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static inline void i2c_set_target(i2c_bus *bus, u32 address) {
+    if (address != bus->last_tar) {
+        bus->hw->enable = 0;
+        while (bus->hw->enable_status & I2C_IC_ENABLE_STATUS_IC_EN_BITS) {}
+        bus->hw->tar = address;
+        bus->hw->enable = 1;
+        bus->last_tar = address;
+    }
+}
+
+i32 i2c_wait_completion(i2c_lane_t lane) {
+    i2c_bus *bus = &buses[lane];
+    i32 err = 0;
+    while (bus->state == I2C_READING || bus->state == I2C_WRITING) {
+        WFI;
+    }
+    BARRIER;
+
+    if (bus->state != I2C_DONE) {
+        u32 fault = bus->desc.fault;
+        err = fault ? (i32)fault : (i32)I2C_FAULT_UNKOWN;
+    }
+    bus->state = I2C_IDLE;
+    return err;
+}
 
 // Make sure to `#define SDA_PIN` and `#define SCL_PIN` to be used by pico.
 // Defaults are 14 and 15 respectively.
-void i2c_init_master() {
+void i2c_init_master(i2c_config *cfg) {
+
+    if (!i2c_is_cfg_valid(cfg)) {
+        ERROR("i2c_handle invalid: pins not matching correct bus lane\n");
+        PANIC;
+    }
+
+    i2c_lane_t lane = cfg->lane;
+
+    switch (lane) {
+    case I2C0:
+        resets_clear(RESETS_RESET_I2C0_BITS);
+        break;
+    case I2C1:
+        resets_clear(RESETS_RESET_I2C1_BITS);
+        break;
+    }
+
+    i32 sda = cfg->sda_pin;
+    i32 scl = cfg->scl_pin;
+    i2c_bus *bus = &buses[lane];
+
     // Setup pads
-    hw_clear_bits(&pads_bank0_hw->io[SDA_PIN], PADS_I2C_CLEAR);
-    hw_clear_bits(&pads_bank0_hw->io[SCL_PIN], PADS_I2C_CLEAR);
-    hw_set_bits(&pads_bank0_hw->io[SDA_PIN], PADS_I2C_SET);
-    hw_set_bits(&pads_bank0_hw->io[SCL_PIN], PADS_I2C_SET);
+    io_bank0_hw->io[sda].ctrl = GPIO_FUNC_I2C;
+    io_bank0_hw->io[scl].ctrl = GPIO_FUNC_I2C;
+    hw_clear_bits(&pads_bank0_hw->io[sda], PADS_I2C_CLEAR);
+    hw_clear_bits(&pads_bank0_hw->io[scl], PADS_I2C_CLEAR);
+    hw_set_bits(&pads_bank0_hw->io[sda], PADS_I2C_SET);
+    hw_set_bits(&pads_bank0_hw->io[scl], PADS_I2C_SET);
 
     // Most i2c config requires enable = 0.
-    i2c_hw->enable = 0;
-    while (i2c_hw->enable_status & I2C_IC_ENABLE_STATUS_IC_EN_BITS) {}
+    bus->hw->enable = 0;
+    while (bus->hw->enable_status & I2C_IC_ENABLE_STATUS_IC_EN_BITS) {}
 
     // Config I2C1 as master
-    i2c_hw->con = I2C_INIT_SET;
-
-    // Specify target address
-    i2c_hw->tar = BME280_I2C_ADDR_PRIM;
+    bus->hw->con = I2C_INIT_SET;
 
     // The following numbers calculated from specification formulas for 12Mhz clk_sys
     // lcnt and hcnt ar ic_clk settings
     //
     // TODO(vasilis): calculate these at comptime rather than hardcode
     //
-    i2c_hw->ss_scl_hcnt = 48;
-    i2c_hw->ss_scl_lcnt = 72;
-    i2c_hw->fs_spklen = 1;
-    i2c_hw->sda_hold = 4;
-
-    i2c_hw->enable = 1;
+    bus->hw->ss_scl_hcnt = 48;
+    bus->hw->ss_scl_lcnt = 72;
+    bus->hw->fs_spklen = 1;
+    bus->hw->sda_hold = 4;
 }
 
-volatile i2c_state i2c1_state = I2C_IDLE;
-typedef struct {
-    volatile u8 *buf;
-    u8 *write_registers;
-    b32 write_is_data;
-    u32 issued;
-    u32 received;
-    u32 length;
-    u32 abrt_source;
-    u32 fault;
-    u8 reg_addr;
-} i2c_descriptor;
-
-//static i2c_descriptor i2c0_descriptor;
-static i2c_descriptor i2c1_descriptor;
-
-u32 i2c_get_fault() {
-    return i2c1_descriptor.fault;
+u32 i2c_get_fault(i2c_lane_t lane) {
+    return buses[lane].desc.fault;
 }
 
-u32 i2c_get_received() {
-    return i2c1_descriptor.received;
+u32 i2c_get_received(i2c_lane_t lane) {
+    return buses[lane].desc.received;
 }
 
-u32 i2c_get_abrt_source() {
-    return i2c1_descriptor.abrt_source;
+u32 i2c_get_abrt_source(i2c_lane_t lane) {
+    return buses[lane].desc.abrt_source;
 }
 
-u32 i2c_abrt_get_dropped() {
-    return i2c1_descriptor.length - i2c1_descriptor.received;
+u32 i2c_abrt_get_dropped(i2c_lane_t lane) {
+    return buses[lane].desc.length - buses[lane].desc.received;
 }
 
-void i2c_irq_enable(i2c_lane bus_lane) {
+void i2c_irq_enable(i2c_lane_t bus_lane) {
     if (bus_lane == I2C0) {
         i2c0_hw->intr_mask = (I2C_IC_INTR_MASK_M_STOP_DET_BITS | I2C_IC_INTR_MASK_M_TX_ABRT_BITS |
                               I2C_IC_INTR_MASK_M_RX_OVER_BITS);
         m33_hw->nvic_iser[1] = 1u << 4;
+
     } else if (bus_lane == I2C1) {
         i2c1_hw->intr_mask = (I2C_IC_INTR_MASK_M_STOP_DET_BITS | I2C_IC_INTR_MASK_M_TX_ABRT_BITS |
                               I2C_IC_INTR_MASK_M_RX_OVER_BITS);
@@ -120,20 +166,35 @@ void i2c_irq_enable(i2c_lane bus_lane) {
     }
 }
 
-// DEBUG: storm guard snapshot, remove once write is fixed
-volatile u32 dbg_isr_hits;
-volatile u32 dbg_intr_stat;
-volatile u32 dbg_intr_mask;
-volatile u32 dbg_rxflr;
-volatile u32 dbg_txflr;
-volatile u32 dbg_state;
+i2c_state i2c_poll_state(i2c_lane_t lane) {
+    return buses[lane].state;
+}
 
-b32 i2c_start_bulk_read_async(u8 reg_addr, volatile u8 *buf, u32 len) {
-    if (i2c1_state != I2C_IDLE) {
+i32 i2c_release(i2c_lane_t lane) {
+    i2c_bus *bus = &buses[lane];
+    i2c_state state = bus->state;
+    if (state == I2C_READING || state == I2C_WRITING) {
         return I2C_BUS_BUSY;
     }
+    bus->state = I2C_IDLE;
+    return 0;
+}
 
-    i2c1_descriptor = (i2c_descriptor){
+// DEBUG: storm guard snapshot, remove once write is fixed
+
+#if I2C_DEBUG
+debug_stats dbg;
+#endif
+
+b32 i2c_start_bulk_read_async(i2c_lane_t lane, u32 target_address, u8 reg_addr, volatile u8 *buf, u32 len) {
+    i2c_bus *bus = &buses[lane];
+
+    if (bus->state != I2C_IDLE) {
+        return I2C_BUS_BUSY;
+    }
+    i2c_set_target(bus, target_address);
+
+    bus->desc = (i2c_descriptor){
         .buf = buf,
         .issued = 0,
         .received = 0,
@@ -142,147 +203,172 @@ b32 i2c_start_bulk_read_async(u8 reg_addr, volatile u8 *buf, u32 len) {
         .abrt_source = 0,
     };
 
-    dbg_isr_hits = 0; // DEBUG
-    i2c1_hw->data_cmd = reg_addr;
-    i2c1_state = I2C_READING;
-    i2c1_hw->intr_mask |= (I2C_IC_INTR_MASK_M_TX_EMPTY_BITS | I2C_IC_INTR_MASK_M_RX_FULL_BITS);
+    bus->isr_hits = 0;
+    bus->hw->data_cmd = reg_addr;
+
+    bus->state = I2C_READING;
+    bus->hw->intr_mask |= (I2C_IC_INTR_MASK_M_TX_EMPTY_BITS | I2C_IC_INTR_MASK_M_RX_FULL_BITS);
 
     return 0;
 }
 
-b32 i2c_start_bulk_write_async(i2c_address_data_pair_array *input) {
-    if (i2c1_state != I2C_IDLE) {
+b32 i2c_start_bulk_write_async(i2c_lane_t lane, u32 target_address, i2c_address_data_pair_array *input) {
+    i2c_bus *bus = &buses[lane];
+    if (bus->state != I2C_IDLE) {
         return I2C_BUS_BUSY;
     }
 
-    i2c1_descriptor = (i2c_descriptor){
+    i2c_set_target(bus, target_address);
+
+    bus->desc = (i2c_descriptor){
         .buf = input->data,
         .write_registers = input->addresses,
         .length = input->capacity,
     };
 
-    dbg_isr_hits = 0; // DEBUG
-    i2c1_state = I2C_WRITING;
-    i2c1_hw->intr_mask |= (I2C_IC_INTR_MASK_M_TX_EMPTY_BITS);
+    bus->isr_hits = 0;
+
+    bus->state = I2C_WRITING;
+    bus->hw->intr_mask |= (I2C_IC_INTR_MASK_M_TX_EMPTY_BITS);
 
     return 0;
 }
 
-void I2C1_IRQ_Handler() {
-    u32 irq_status = i2c1_hw->intr_stat;
+void i2c_irq(i2c_bus *bus) {
+    u32 irq_status = bus->hw->intr_stat;
 
-    // DEBUG: storm guard
-    if (++dbg_isr_hits > 10000) {
-        dbg_intr_stat = irq_status;
-        dbg_intr_mask = i2c1_hw->intr_mask;
-        dbg_rxflr = i2c1_hw->rxflr;
-        dbg_txflr = i2c1_hw->txflr;
-        dbg_state = i2c1_state;
-        i2c1_hw->intr_mask = 0;
-        i2c1_state = I2C_ERROR;
+    if (++bus->isr_hits > 10000) {
+
+#if I2C_DEBUG
+        dbg.intr_stat = irq_status;
+        dbg.intr_mask = bus->hw->intr_mask;
+        dbg.rxflr = bus->hw->rxflr;
+        dbg.txflr = bus->hw->txflr;
+        dbg.state = bus->state;
+#endif
+
+        bus->hw->intr_mask = 0;
+        bus->desc.fault |= I2C_FAULT_STORM;
+        bus->state = I2C_ERROR;
         return;
     }
 
     if (irq_status & I2C_IC_INTR_STAT_R_TX_ABRT_BITS) {
-        u32 abrt_source = i2c1_hw->tx_abrt_source;
-        (void)i2c1_hw->clr_tx_abrt;
-        (void)i2c1_hw->clr_stop_det;
-        if (i2c1_state == I2C_READING || i2c1_state == I2C_WRITING) {
-            i2c1_descriptor.abrt_source = abrt_source;
-            i2c1_hw->intr_mask &= ~(I2C_IC_INTR_MASK_M_TX_EMPTY_BITS | I2C_IC_INTR_MASK_M_RX_FULL_BITS);
-            clear_rx();
-            i2c1_descriptor.fault |= I2C_FAULT_ABORT;
-            i2c1_state = I2C_ERROR;
+        u32 abrt_source = bus->hw->tx_abrt_source;
+        (void)bus->hw->clr_tx_abrt;
+        (void)bus->hw->clr_stop_det;
+        if (bus->state == I2C_READING || bus->state == I2C_WRITING) {
+            bus->desc.abrt_source = abrt_source;
+            bus->hw->intr_mask &= ~(I2C_IC_INTR_MASK_M_TX_EMPTY_BITS | I2C_IC_INTR_MASK_M_RX_FULL_BITS);
+            clear_rx(bus);
+            bus->desc.fault |= I2C_FAULT_ABORT;
+            bus->state = I2C_ERROR;
         }
         return;
     }
 
     if (irq_status & I2C_IC_INTR_STAT_R_RX_OVER_BITS) {
-        (void)i2c1_hw->clr_rx_over;
-        if (i2c1_state == I2C_READING) {
-            i2c1_descriptor.fault |= I2C_FAULT_OVERRUN;
-            i2c1_state = I2C_ERROR;
+        (void)bus->hw->clr_rx_over;
+        if (bus->state == I2C_READING) {
+            bus->desc.fault |= I2C_FAULT_OVERRUN;
+            bus->state = I2C_ERROR;
         }
     }
 
     if (irq_status & I2C_IC_INTR_STAT_R_RX_FULL_BITS) {
-        if (i2c1_state == I2C_READING) {
-            drain_rx();
+        if (bus->state == I2C_READING) {
+            drain_rx(bus);
         } else {
-            clear_rx();
+            clear_rx(bus);
         }
     }
 
     if (irq_status & I2C_IC_INTR_STAT_R_TX_EMPTY_BITS) {
-        if (i2c1_state == I2C_READING) {
-            pump_tx_read();
-        } else if (i2c1_state == I2C_WRITING) {
-            pump_tx_write();
+        if (bus->state == I2C_READING) {
+            pump_tx_read(bus);
+        } else if (bus->state == I2C_WRITING) {
+            pump_tx_write(bus);
         }
     }
 
     if (irq_status & I2C_IC_INTR_STAT_R_STOP_DET_BITS) {
-        (void)i2c1_hw->clr_stop_det;
-        if (i2c1_state == I2C_READING) {
-            drain_rx();
-            i2c1_state = (i2c1_descriptor.received == i2c1_descriptor.length) ? I2C_DONE : I2C_ERROR;
+        (void)bus->hw->clr_stop_det;
+        if (bus->state == I2C_READING) {
+            drain_rx(bus);
+            if (bus->desc.received == bus->desc.length) {
+                bus->state = I2C_DONE;
+            } else {
+                bus->desc.fault |= I2C_FAULT_EARLY_STOP;
+                bus->state = I2C_ERROR;
+            }
         }
-        if (i2c1_state == I2C_WRITING) {
-            clear_rx();
-            i2c1_state = (i2c1_descriptor.issued == i2c1_descriptor.length) ? I2C_DONE : I2C_ERROR;
+        if (bus->state == I2C_WRITING) {
+            clear_rx(bus);
+            if (bus->desc.issued == bus->desc.length) {
+                bus->state = I2C_DONE;
+            } else {
+                bus->desc.fault |= I2C_FAULT_EARLY_STOP;
+                bus->state = I2C_ERROR;
+            }
         }
     }
 
-    if (i2c1_state != I2C_READING && i2c1_state != I2C_WRITING) {
-        i2c1_hw->intr_mask &= ~(I2C_IC_INTR_MASK_M_TX_EMPTY_BITS | I2C_IC_INTR_MASK_M_RX_FULL_BITS);
+    if (bus->state != I2C_READING && bus->state != I2C_WRITING) {
+        bus->hw->intr_mask &= ~(I2C_IC_INTR_MASK_M_TX_EMPTY_BITS | I2C_IC_INTR_MASK_M_RX_FULL_BITS);
+    }
+}
+void I2C0_IRQ_Handler() {
+    i2c_irq(&buses[I2C0]);
+}
+void I2C1_IRQ_Handler() {
+    i2c_irq(&buses[I2C1]);
+}
+
+static void drain_rx(i2c_bus *bus) {
+    while ((bus->desc.received < bus->desc.issued) && (bus->hw->status & I2C_IC_STATUS_RFNE_BITS)) { // same as RX_FULL interrupt
+        bus->desc.buf[bus->desc.received++] = (u8)(bus->hw->data_cmd & I2C_IC_DATA_CMD_DAT_BITS);
     }
 }
 
-static void drain_rx() {
-    while ((i2c1_descriptor.received < i2c1_descriptor.issued) && (i2c_hw->status & I2C_IC_STATUS_RFNE_BITS)) { // same as RX_FULL interrupt
-        i2c1_descriptor.buf[i2c1_descriptor.received++] = (u8)(i2c_hw->data_cmd & I2C_IC_DATA_CMD_DAT_BITS);
-    }
-}
-
-static void pump_tx_read() {
-    while ((i2c1_descriptor.issued < i2c1_descriptor.length) && (i2c_hw->status & I2C_IC_STATUS_TFNF_BITS)) { // same as TX_EMPTY interrupt
+static void pump_tx_read(i2c_bus *bus) {
+    while ((bus->desc.issued < bus->desc.length) && (bus->hw->status & I2C_IC_STATUS_TFNF_BITS)) { // same as TX_EMPTY interrupt
         u32 cmd = I2C_IC_DATA_CMD_CMD_BITS;
-        if (i2c1_descriptor.issued == 0) {
+        if (bus->desc.issued == 0) {
             cmd |= I2C_IC_DATA_CMD_RESTART_BITS;
         }
-        if (i2c1_descriptor.issued == i2c1_descriptor.length - 1) {
+        if (bus->desc.issued == bus->desc.length - 1) {
             cmd |= I2C_IC_DATA_CMD_STOP_BITS;
         }
-        i2c_hw->data_cmd = cmd;
-        i2c1_descriptor.issued++;
+        bus->hw->data_cmd = cmd;
+        bus->desc.issued++;
     }
-    if (i2c1_descriptor.issued == i2c1_descriptor.length) {
-        i2c1_hw->intr_mask &= ~I2C_IC_INTR_MASK_M_TX_EMPTY_BITS;
+    if (bus->desc.issued == bus->desc.length) {
+        bus->hw->intr_mask &= ~I2C_IC_INTR_MASK_M_TX_EMPTY_BITS;
     }
 }
 
-static void pump_tx_write() {
-    while ((i2c1_descriptor.issued < i2c1_descriptor.length) && (i2c_hw->status & I2C_IC_STATUS_TFNF_BITS)) { // same as TX_EMPTY interrupt
+static void pump_tx_write(i2c_bus *bus) {
+    while ((bus->desc.issued < bus->desc.length) && (bus->hw->status & I2C_IC_STATUS_TFNF_BITS)) { // same as TX_EMPTY interrupt
         u32 cmd = 0;
-        if (!i2c1_descriptor.write_is_data) {
-            cmd = i2c1_descriptor.write_registers[i2c1_descriptor.issued];
+        if (!bus->desc.write_is_data) {
+            cmd = bus->desc.write_registers[bus->desc.issued];
         } else {
-            cmd = i2c1_descriptor.buf[i2c1_descriptor.issued];
-            if (i2c1_descriptor.issued == i2c1_descriptor.length - 1) {
+            cmd = bus->desc.buf[bus->desc.issued];
+            if (bus->desc.issued == bus->desc.length - 1) {
                 cmd |= I2C_IC_DATA_CMD_STOP_BITS;
             }
-            i2c1_descriptor.issued++;
+            bus->desc.issued++;
         }
-        i2c1_descriptor.write_is_data = !i2c1_descriptor.write_is_data;
-        i2c_hw->data_cmd = cmd;
+        bus->desc.write_is_data = !bus->desc.write_is_data;
+        bus->hw->data_cmd = cmd;
     }
-    if (i2c1_descriptor.issued == i2c1_descriptor.length) {
-        i2c1_hw->intr_mask &= ~I2C_IC_INTR_MASK_M_TX_EMPTY_BITS;
+    if (bus->desc.issued == bus->desc.length) {
+        bus->hw->intr_mask &= ~I2C_IC_INTR_MASK_M_TX_EMPTY_BITS;
     }
 }
 
-static void clear_rx() {
-    while (i2c1_hw->rxflr) {
-        (void)(i2c_hw->data_cmd & I2C_IC_DATA_CMD_DAT_BITS);
+static void clear_rx(i2c_bus *bus) {
+    while (bus->hw->rxflr) {
+        (void)(bus->hw->data_cmd & I2C_IC_DATA_CMD_DAT_BITS);
     }
 }

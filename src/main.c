@@ -15,17 +15,12 @@
 
 #define SYST_CYCLES 12
 #define PIN25 25
-#define SDA_PIN 14
-#define SCL_PIN 15
 
-#define RESETS_CLEAR (RESETS_RESET_IO_BANK0_BITS | RESETS_RESET_PADS_BANK0_BITS | RESETS_RESET_I2C1_BITS)
+#define RESETS_CLEAR (RESETS_RESET_IO_BANK0_BITS | RESETS_RESET_PADS_BANK0_BITS)
 
 #define SYSTICK_FREQ_HZ 1000
 #define EXT_CLK_FREQ_HZ 1000000
 #define SYSTICK_TOP (EXT_CLK_FREQ_HZ / SYSTICK_FREQ_HZ - 1)
-
-// DEBUG: storm guard snapshot from i2c_state_machine.c
-extern volatile u32 dbg_isr_hits, dbg_intr_stat, dbg_intr_mask, dbg_rxflr, dbg_txflr, dbg_state;
 
 /* clk_sys must already be configured. Usually done in `crt0`*/
 void configure_systick(u8 cycles) {
@@ -43,7 +38,7 @@ void configure_systick(u8 cycles) {
     m33_hw->syst_csr = M33_SYST_CSR_TICKINT_BITS | M33_SYST_CSR_ENABLE_BITS;
 }
 
-static inline void delay(u32 ms_to_wait);
+static inline void delay_ms(u32 ms_to_wait);
 
 static volatile bme280_raw_data_t raw_data;
 static b32 bme280_is_configged = FALSE;
@@ -79,8 +74,6 @@ void main() {
 
     //io_bank0_hw -> gpio function selection
     io_bank0_hw->io[PIN25].ctrl = GPIO_FUNC_SIO;
-    io_bank0_hw->io[SDA_PIN].ctrl = GPIO_FUNC_I2C;
-    io_bank0_hw->io[SCL_PIN].ctrl = GPIO_FUNC_I2C;
 
     // Pads bank -> configure pads for led
     hw_clear_bits(&pads_bank0_hw->io[PIN25], PADS_BANK0_GPIO0_ISO_BITS);
@@ -91,15 +84,28 @@ void main() {
     // clk_sys must be configured before calling this function.
     configure_systick(SYST_CYCLES);
 
-    print(rtt_writer, "\nRTT   {s}OK{s}\n", LITERAL(ANSI_GREEN), LITERAL(ANSI_CLEAR));
-    i2c_init_master();
-    i2c_irq_enable(I2C1);
+    i2c_config i2c1_cfg = {
+        .sda_pin = GP12,
+        .scl_pin = GP13,
+    };
 
+    print(rtt_writer, "\nRTT   {s}OK{s}\n", LITERAL(ANSI_GREEN), LITERAL(ANSI_CLEAR));
+    flush(rtt_writer);
+
+    i2c_init_master(&i2c1_cfg);
+    i2c_irq_enable(i2c1_cfg.lane);
+
+    bme280_set_lane(i2c1_cfg.lane);
     bme280_calib_t calib_params;
     i32 calib_error = bme280_get_calib_params(&calib_params);
 
     if (calib_error != 0) {
         print(rtt_writer, "get_calib_params error: {d}\n", calib_error);
+        print(rtt_writer, "calib_params err fault={u:x} abrt={u:x}\n", i2c_get_fault(i2c1_cfg.lane), i2c_get_abrt_source(i2c1_cfg.lane));
+#if I2C_DEBUG
+        print(rtt_writer, "hits={u} stat={u:x} mask={u:x}\n", dbg.isr_hits, dbg.intr_stat, dbg.intr_mask);
+        print(rtt_writer, "state={u} rxflr={u} txflr={u}\n", dbg.state, dbg.rxflr, dbg.txflr);
+#endif
         flush(rtt_writer);
         PANIC;
     }
@@ -119,19 +125,20 @@ void main() {
     }
 
     // Delay for first conversion after setting normal mode.
-    delay(20);
-    bme280_is_configged = TRUE;
+    delay_ms(20);
 
     u8 readback[4];
-    i2c_start_bulk_read_async(BME280_REG_CTRL_HUM, readback, 4); //0xf2..0xf5
-    while (i2c1_state == I2C_READING) {
-        WFI;
+    i2c_start_bulk_read_async(i2c1_cfg.lane, BME280_I2C_ADDR_PRIM, BME280_REG_CTRL_HUM, readback, 4); //0xf2..0xf5
+    i32 readback_err = i2c_wait_completion(i2c1_cfg.lane);
+    if (readback_err != 0) {
+        print(rtt_writer, "set_config error: {d}\n", config_error);
+        flush(rtt_writer);
+        PANIC;
     }
-    BARRIER;
-    i2c1_state = I2C_IDLE;
 
     if (readback[0] == config_data.ctrl_hum && readback[2] == config_data.ctrl_meas && readback[3] == config_data.config) {
         write_all(rtt_writer, "SETUP " ANSI_GREEN "OK" ANSI_CLEAR "\n\n\n");
+        bme280_is_configged = TRUE;
     } else {
         write_all(rtt_writer, "SETUP " ANSI_RED "FAILED" ANSI_CLEAR "\n");
         write_all(rtt_writer, "  Printing config readout:\n");
@@ -144,17 +151,22 @@ void main() {
     flush(rtt_writer);
 
     for (;;) {
+        i2c_state i2c1_state = i2c_poll_state(i2c1_cfg.lane);
         if (i2c1_state == I2C_DONE) {
             bme280_final_data data = bme280_compensate_data(&calib_params, &raw_data);
-            i2c1_state = I2C_IDLE;
+            i2c_release(i2c1_cfg.lane);
             print(rtt_writer, ANSI_RETURN_CARRIAGE "readout: temp: {d}, press: {d}, hum: {d}\n", data.temp, data.press, data.hum);
 
         } else if (i2c1_state == I2C_ERROR) {
-            print(rtt_writer, "write err fault={u:x} abrt={u:x}\n", i2c_get_fault(), i2c_get_abrt_source());
-            print(rtt_writer, "hits={u} stat={u:x} mask={u:x}\n", dbg_isr_hits, dbg_intr_stat, dbg_intr_mask);
-            print(rtt_writer, "state={u} rxflr={u} txflr={u}\n", dbg_state, dbg_rxflr, dbg_txflr);
+            print(rtt_writer, "write err fault={u:x} abrt={u:x}\n", i2c_get_fault(i2c1_cfg.lane), i2c_get_abrt_source(i2c1_cfg.lane));
+
+#if I2C_DEBUG
+            print(rtt_writer, "hits={u} stat={u:x} mask={u:x}\n", dbg.isr_hits, dbg.intr_stat, dbg.intr_mask);
+            print(rtt_writer, "state={u} rxflr={u} txflr={u}\n", dbg.state, dbg.rxflr, dbg.txflr);
+#endif
+
             flush(rtt_writer);
-            i2c1_state = I2C_IDLE;
+            i2c_release(i2c1_cfg.lane);
             PANIC;
         }
         flush(rtt_writer);
@@ -162,7 +174,7 @@ void main() {
     }
 }
 
-static inline void delay(u32 ms_to_wait) {
+static inline void delay_ms(u32 ms_to_wait) {
     u32 wait_until = ms + ms_to_wait;
     while ((i32)(ms - wait_until) < 0) {
         WFI;
