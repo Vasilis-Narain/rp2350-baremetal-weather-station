@@ -180,7 +180,7 @@ i32 i2c_release(i2c_lane_t lane) {
     return 0;
 }
 
-// DEBUG: storm guard snapshot, remove once write is fixed
+// Storm guard snapshot: register state captured when the ISR fires too many times in one transfer.
 
 #if I2C_DEBUG
 debug_stats dbg;
