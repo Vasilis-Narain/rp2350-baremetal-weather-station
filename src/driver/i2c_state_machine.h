@@ -11,6 +11,9 @@
 #define I2C_RESTART_READ_MASK (I2C_IC_DATA_CMD_CMD_BITS | I2C_IC_DATA_CMD_RESTART_BITS)
 #define I2C_RESTART_READ_STOP_MASK (I2C_IC_DATA_CMD_CMD_BITS | I2C_IC_DATA_CMD_RESTART_BITS | I2C_IC_DATA_CMD_STOP_BITS)
 
+#define I2C_MIN_TARGET_ADDRESS 0x08
+#define I2C_MAX_TARGET_ADDRESS 0x77
+
 typedef enum {
     I2C0,
     I2C1,
@@ -123,6 +126,7 @@ extern debug_stats dbg;
 // Bus error
 #define I2C_BUS_BUSY -1
 
+b32 i2c_probe(i2c_lane_t lane, u8 address);
 b32 i2c_start_bulk_read_async(i2c_lane_t lane, u32 target_address, u8 reg_addr, volatile u8 *buf, u32 len);
 b32 i2c_start_bulk_write_async(i2c_lane_t lane, u32 target_address, i2c_address_data_pair_array *input);
 void i2c_irq_enable(i2c_lane_t lane);

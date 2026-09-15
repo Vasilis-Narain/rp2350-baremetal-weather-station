@@ -186,6 +186,31 @@ i32 i2c_release(i2c_lane_t lane) {
 debug_stats dbg;
 #endif
 
+b32 i2c_probe(i2c_lane_t lane, u8 target_address) {
+    i2c_bus *bus = &buses[lane];
+    if (bus->state != I2C_IDLE) {
+        return I2C_BUS_BUSY;
+    }
+
+    u32 done_bits = I2C_IC_RAW_INTR_STAT_STOP_DET_BITS | I2C_IC_RAW_INTR_STAT_TX_ABRT_BITS;
+    i2c_set_target(bus, target_address);
+    (void)bus->hw->clr_intr;
+
+    bus->hw->data_cmd = I2C_IC_DATA_CMD_CMD_BITS | I2C_IC_DATA_CMD_STOP_BITS;
+
+    u32 spins = 100000;
+    while (!(bus->hw->raw_intr_stat & done_bits) && --spins) {}
+
+    b32 present = spins && !(bus->hw->tx_abrt_source & I2C_IC_TX_ABRT_SOURCE_ABRT_7B_ADDR_NOACK_BITS);
+
+    (void)bus->hw->clr_tx_abrt;
+    while (bus->hw->rxflr) {
+        (void)bus->hw->data_cmd;
+    }
+    while (bus->hw->status & I2C_IC_STATUS_ACTIVITY_BITS) {}
+    return present;
+}
+
 b32 i2c_start_bulk_read_async(i2c_lane_t lane, u32 target_address, u8 reg_addr, volatile u8 *buf, u32 len) {
     i2c_bus *bus = &buses[lane];
 

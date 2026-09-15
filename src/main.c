@@ -67,6 +67,8 @@ void main() {
     Writer *rtt_writer = &rtt_writer_instance;
 
     WRITER_INIT(rtt_writer, writer_buf, rtt_flush);
+    write_all(rtt_writer, "\nRTT " ANSI_GREEN "OK\n" ANSI_CLEAR);
+    flush(rtt_writer);
 
     // Always first clear reset bits for desired functionalities.
     // In this case: iobank, padsbank, i2c
@@ -85,14 +87,21 @@ void main() {
     configure_systick(SYST_CYCLES);
 
     i2c_config i2c1_cfg = {
-        .sda_pin = GP12,
-        .scl_pin = GP13,
+        .sda_pin = GP14,
+        .scl_pin = GP15,
     };
 
-    print(rtt_writer, "\nRTT   {s}OK{s}\n", LITERAL(ANSI_GREEN), LITERAL(ANSI_CLEAR));
-    flush(rtt_writer);
-
     i2c_init_master(&i2c1_cfg);
+
+    write_all(rtt_writer, "\nProbing I2C Peripherals:\n");
+    for (u8 i = I2C_MIN_TARGET_ADDRESS; i <= I2C_MAX_TARGET_ADDRESS; i++) {
+        b32 result = i2c_probe(i2c1_cfg.lane, i);
+        if (result) {
+            print(rtt_writer, "  probed address: {u:xb}\n", i);
+            flush(rtt_writer);
+        }
+    }
+
     i2c_irq_enable(i2c1_cfg.lane);
 
     bme280_set_lane(i2c1_cfg.lane);
@@ -102,6 +111,7 @@ void main() {
     if (calib_error != 0) {
         print(rtt_writer, "get_calib_params error: {d}\n", calib_error);
         print(rtt_writer, "calib_params err fault={u:x} abrt={u:x}\n", i2c_get_fault(i2c1_cfg.lane), i2c_get_abrt_source(i2c1_cfg.lane));
+
 #if I2C_DEBUG
         print(rtt_writer, "hits={u} stat={u:x} mask={u:x}\n", dbg.isr_hits, dbg.intr_stat, dbg.intr_mask);
         print(rtt_writer, "state={u} rxflr={u} txflr={u}\n", dbg.state, dbg.rxflr, dbg.txflr);
@@ -125,7 +135,7 @@ void main() {
     }
 
     // Delay for first conversion after setting normal mode.
-    delay_ms(20);
+    delay_ms(10);
 
     u8 readback[4];
     i2c_start_bulk_read_async(i2c1_cfg.lane, BME280_I2C_ADDR_PRIM, BME280_REG_CTRL_HUM, readback, 4); //0xf2..0xf5
@@ -137,10 +147,10 @@ void main() {
     }
 
     if (readback[0] == config_data.ctrl_hum && readback[2] == config_data.ctrl_meas && readback[3] == config_data.config) {
-        write_all(rtt_writer, "SETUP " ANSI_GREEN "OK" ANSI_CLEAR "\n\n\n");
+        write_all(rtt_writer, "\nBME280 SETUP " ANSI_GREEN "OK" ANSI_CLEAR "\n\n\n");
         bme280_is_configged = TRUE;
     } else {
-        write_all(rtt_writer, "SETUP " ANSI_RED "FAILED" ANSI_CLEAR "\n");
+        write_all(rtt_writer, "\nBME280 SETUP " ANSI_RED "FAILED" ANSI_CLEAR "\n");
         write_all(rtt_writer, "  Printing config readout:\n");
         print(rtt_writer, "    hum={u:xb}\n    meas={u:xb}\n    cfg={u:xb}\n\n", readback[0], readback[2], readback[3]);
         flush(rtt_writer);
