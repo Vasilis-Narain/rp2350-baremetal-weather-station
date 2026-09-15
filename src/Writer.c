@@ -73,7 +73,7 @@ i32 writer_print(Writer *writer, const char *fmt, u32 length, ...) {
         if (c == '{') {
             c = next(&fmt, end);
 
-            if (c == 's') { // This is the preferred path. Use LITERAL("hello daddy") or STRING(ptr, length) macros
+            if (c == 's') { // This is the preferred path. Use LITERAL("hello world") or STRING(ptr, length) macros
                 if (next(&fmt, end) != '}') {
                     PANIC;
                 }

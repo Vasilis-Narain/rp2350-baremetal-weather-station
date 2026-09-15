@@ -1,7 +1,7 @@
 # BME280 I2C Driver (RP2350)
 
-BME280 driver in C for the Pico 2, bare metal. No SDK, no HAL, no libc. Using only the `register` and `struct` headers provided by the `pico-sdk`,
-because transcribing addresses isn't particularly interesting.
+BME280 driver in C for the Pico 2, bare metal. No SDK, no HAL, no libc. Using only the `register` and `struct` headers provided by the `pico-sdk`.
+
 
 ***Work in progress***: setup and blocking reads work. The goal is to have this work as a non-blocking interrupt-based state machine. 
 
