@@ -14,7 +14,8 @@ CC      := $(CROSS)gcc
 OBJCOPY := $(CROSS)objcopy
 SIZE    := $(CROSS)size
 
-SDK := C:/Users/Vasilis/pico-sdk/src
+# Override on the command line: make SDK=/path/to/pico-sdk/src
+SDK ?= C:/Users/Vasilis/pico-sdk/src
 INCS := -Iinclude \
         -I$(SDK)/rp2350/hardware_structs/include \
         -I$(SDK)/rp2350/hardware_regs/include

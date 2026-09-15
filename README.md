@@ -1,9 +1,8 @@
-# BME280 I2C Driver (RP2350)
+# Bare-Metal Weather Station Firmware (RP2350)
 
-BME280 driver in C for the Pico 2, bare metal. No SDK, no HAL, no libc. Using only the `register` and `struct` headers provided by the `pico-sdk`.
+Bare-metal C firmware for the Pico 2 that reads a Bosch BME280 over an interrupt-driven I2C driver. No SDK runtime, no HAL, no libc. Using only the generated `register` and `struct` headers provided by the `pico-sdk`.
 
-
-***Work in progress***: setup and blocking reads work. The goal is to have this work as a non-blocking interrupt-based state machine. 
+***Work in progress***: startup, RTT logging, the interrupt-driven I2C state machine (bulk read and write) and SysTick-scheduled BME280 readout all work on hardware. Next: second I2C bus for an OLED display, and removing the temporary ISR debug instrumentation.
 
 ## Hardware
 
@@ -120,7 +119,7 @@ make flash     # probe-rs download + reset
 make run       # flash and stream RTT
 ```
 
-Point `SDK` in the Makefile to the Pico headers: `SDK=/path/to/pico-sdk/src/rp2350/hardware_regs/include`
+Point `SDK` at the `src` directory of a `pico-sdk` checkout: `make SDK=/path/to/pico-sdk/src`
 
 Also, `make flash` and `make run` require [`probe-rs`](https://probe.rs/) to be on PATH and a connected debug probe.
 
@@ -139,11 +138,11 @@ reducing i/o calls dramatically. In this case i/o is just copying bytes to the S
 with the syntax (again inspired by Zig, but not faithfully). `{d}` for int, `{u}` for uint, `{u:xb}` for a (`x`)hex (`b`) byte. Decimal to string using a two-digit-at-a-time
 lookup table based algorithm. Hex to string branchless SWAR algorithm, adapted from [here](https://johnnylee-sde.github.io/Fast-unsigned-integer-to-hex-string/).
 
-**I2C** (`driver/`) -- ISR completed and working as expected. The read request is initiated by SysTick (on a 500ms interval) and the main loop
+**I2C** (`driver/`) -- ISR state machine working on hardware (still carries temporary debug instrumentation). The read request is initiated by SysTick (on a 500ms interval) and the main loop
 checks for `i2c1_state == I2C_DONE` to update output data. Currently the data is displayed via RTT for testing.
 
 ## TODO
 
 - verify the bus with a logic analyser.
-- adapt/refactor ISR to use multiple i2c busses (RP2350 has two) in order to support a small i2c lcd display. Ideally minimal modifications
-(past supporting the second bus) is needed as the current ISR is peripheral agnostic.
+- refactor the driver to support both I2C buses (RP2350 has two) for a small I2C OLED display: move the bus-specific
+state (`i2c1_hw`, `i2c1_state`, `i2c1_descriptor`) into a per-bus context so the ISR logic can be shared.

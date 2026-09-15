@@ -85,7 +85,7 @@ i32 writer_print(Writer *writer, const char *fmt, u32 length, ...) {
                 }
                 bytes_printed += bytes;
 
-            } else if (c == 'z') { // for c strings. We(I) don't like these.
+            } else if (c == 'z') { // for NUL-terminated C strings. Prefer {s}: no strlen scan.
                 if (next(&fmt, end) != '}') {
                     PANIC;
                 }

@@ -34,13 +34,6 @@
 #endif
 #endif
 
-#ifdef I2C1_ENABLE
-#define i2c_hw i2c1_hw
-#endif
-#ifdef I2C0_ENABLE
-#define i2c_hw i2c0_hw
-#endif
-
 #define I2C_INIT_SET (I2C_IC_CON_MASTER_MODE_VALUE_ENABLED |                    \
                       I2C_IC_CON_SPEED_VALUE_STANDARD << I2C_IC_CON_SPEED_LSB | \
                       I2C_IC_CON_IC_RESTART_EN_BITS |                           \
