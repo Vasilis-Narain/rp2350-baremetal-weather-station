@@ -133,6 +133,7 @@ extern debug_stats dbg;
 b32 i2c_probe(i2c_lane_t lane, u8 address);
 b32 i2c_start_bulk_read_async(i2c_lane_t lane, u32 target_address, u8 reg_addr, volatile u8 *buf, u32 len);
 b32 i2c_start_bulk_write_alternating_async(i2c_lane_t lane, u32 target_address, i2c_address_data_pair_array *input);
+b32 i2c_start_bulk_write_async(i2c_lane_t lane, u32 target_address, u8 *commands, u32 len);
 void i2c_irq_enable(i2c_lane_t lane);
 u32 i2c_get_abrt_source(i2c_lane_t lane);
 u32 i2c_get_received(i2c_lane_t lane);

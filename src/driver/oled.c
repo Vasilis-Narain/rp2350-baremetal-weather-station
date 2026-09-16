@@ -17,6 +17,7 @@
 //        ^ byte comes here
 
 static u16 oled_tx[1 + 512];
+static i2c_lane_t lane;
 
 void oled_build_tx_buffer(const u8 *frame_buffer, u32 len) {
     oled_tx[0] = 0x40; /// control byte for data stream
@@ -26,4 +27,15 @@ void oled_build_tx_buffer(const u8 *frame_buffer, u32 len) {
     }
 
     oled_tx[len] |= I2C_IC_DATA_CMD_STOP_BITS;
+}
+
+void oled_set_lane(i2c_lane_t bus_lane) {
+    lane = bus_lane;
+}
+
+b32 oled_init(const u8 *commands) {
+    if (i2c_start_bulk_write_async(lane, OLED_I2C_ADDRESS, (u8 *)commands, OLED_DEFAULT_INIT_CMD_LIST_LEN) != 0) {
+        return I2C_BUS_BUSY;
+    }
+    return i2c_wait_completion(lane);
 }

@@ -95,3 +95,5 @@
     OLED_CMD_VAL_SET_CHARGE_PUMP_ENABLE,      \
     OLED_CMD_DISPLAY_ON,                      \
 }
+
+#define OLED_DEFAULT_INIT_CMD_LIST_LEN 21
