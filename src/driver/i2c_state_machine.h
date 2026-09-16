@@ -73,6 +73,7 @@ typedef struct {
     volatile u8 *buf;
     u8 *write_registers;
     b32 write_is_data;
+    b32 write_is_alternating;
     u32 issued;
     u32 received;
     u32 length;
@@ -125,10 +126,11 @@ extern debug_stats dbg;
 
 // Bus error
 #define I2C_BUS_BUSY -1
+#define I2C_RETRY_QUEUE_FULL -(1 << 1)
 
 b32 i2c_probe(i2c_lane_t lane, u8 address);
 b32 i2c_start_bulk_read_async(i2c_lane_t lane, u32 target_address, u8 reg_addr, volatile u8 *buf, u32 len);
-b32 i2c_start_bulk_write_async(i2c_lane_t lane, u32 target_address, i2c_address_data_pair_array *input);
+b32 i2c_start_bulk_write_alternating_async(i2c_lane_t lane, u32 target_address, i2c_address_data_pair_array *input);
 void i2c_irq_enable(i2c_lane_t lane);
 u32 i2c_get_abrt_source(i2c_lane_t lane);
 u32 i2c_get_received(i2c_lane_t lane);

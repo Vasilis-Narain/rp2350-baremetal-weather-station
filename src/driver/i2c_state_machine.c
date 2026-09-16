@@ -180,7 +180,7 @@ i32 i2c_release(i2c_lane_t lane) {
     return 0;
 }
 
-// Storm guard snapshot: register state captured when the ISR fires too many times in one transfer.
+// DEBUG: storm guard snapshot, remove once write is fixed
 
 #if I2C_DEBUG
 debug_stats dbg;
@@ -237,7 +237,7 @@ b32 i2c_start_bulk_read_async(i2c_lane_t lane, u32 target_address, u8 reg_addr, 
     return 0;
 }
 
-b32 i2c_start_bulk_write_async(i2c_lane_t lane, u32 target_address, i2c_address_data_pair_array *input) {
+b32 i2c_start_bulk_write_alternating_asyn(i2c_lane_t lane, u32 target_address, i2c_address_data_pair_array *input) {
     i2c_bus *bus = &buses[lane];
     if (bus->state != I2C_IDLE) {
         return I2C_BUS_BUSY;
@@ -249,6 +249,7 @@ b32 i2c_start_bulk_write_async(i2c_lane_t lane, u32 target_address, i2c_address_
         .buf = input->data,
         .write_registers = input->addresses,
         .length = input->capacity,
+        .write_is_alternating = TRUE,
     };
 
     bus->isr_hits = 0;

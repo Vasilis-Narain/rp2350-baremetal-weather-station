@@ -50,7 +50,7 @@ i32 bme280_set_config(bme280_config_t settings) {
         .capacity = 3,
     };
 
-    if (i2c_start_bulk_write_async(lane, BME280_I2C_ADDR_PRIM, &data_pairs)) {
+    if (i2c_start_bulk_write_alternating_async(lane, BME280_I2C_ADDR_PRIM, &data_pairs)) {
         return I2C_BUS_BUSY;
     }
 
