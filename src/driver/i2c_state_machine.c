@@ -38,6 +38,7 @@
 */
 extern void resets_clear(u32 mask);
 static void pump_tx_write_alternating(i2c_bus *bus);
+static void pump_tx_write(i2c_bus *bus);
 static void pump_tx_read(i2c_bus *bus);
 static void drain_rx(i2c_bus *bus);
 static void clear_rx(i2c_bus *bus);
@@ -260,6 +261,28 @@ b32 i2c_start_bulk_write_alternating_async(i2c_lane_t lane, u32 target_address, 
     return 0;
 }
 
+b32 i2c_start_bulk_write_async(i2c_lane_t lane, u32 target_address, u8 *commands, u32 len) {
+    i2c_bus *bus = &buses[lane];
+    if (bus->state != I2C_IDLE) {
+        return I2C_BUS_BUSY;
+    }
+
+    i2c_set_target(bus, target_address);
+
+    bus->desc = (i2c_descriptor){
+        .write_registers = commands,
+        .length = len,
+        .write_is_alternating = FALSE,
+    };
+
+    bus->isr_hits = 0;
+
+    bus->state = I2C_WRITING;
+    bus->hw->intr_mask |= (I2C_IC_INTR_MASK_M_TX_EMPTY_BITS);
+
+    return 0;
+}
+
 b32 i2c_start_bulk_write_dma(i2c_lane_t lane, u32 target_address, u16 *commands, u32 count, u32 dma_channel) {
     i2c_bus *bus = &buses[lane];
     if (bus->state != I2C_IDLE) {
@@ -336,7 +359,11 @@ void i2c_irq(i2c_bus *bus) {
         if (bus->state == I2C_READING) {
             pump_tx_read(bus);
         } else if (bus->state == I2C_WRITING) {
-            pump_tx_write_alternating(bus);
+            if (bus->desc.write_is_alternating) {
+                pump_tx_write_alternating(bus);
+            } else {
+                pump_tx_write(bus);
+            }
         }
     }
 
@@ -410,6 +437,20 @@ static void pump_tx_write_alternating(i2c_bus *bus) {
         }
         bus->desc.write_is_data = !bus->desc.write_is_data;
         bus->hw->data_cmd = cmd;
+    }
+    if (bus->desc.issued == bus->desc.length) {
+        bus->hw->intr_mask &= ~I2C_IC_INTR_MASK_M_TX_EMPTY_BITS;
+    }
+}
+
+static void pump_tx_write(i2c_bus *bus) {
+    while ((bus->desc.issued < bus->desc.length) && (bus->hw->status & I2C_IC_STATUS_TFNF_BITS)) {
+        u32 cmd = bus->desc.write_registers[bus->desc.issued];
+        if (bus->desc.issued == bus->desc.length - 1) {
+            cmd |= I2C_IC_DATA_CMD_STOP_BITS;
+        }
+        bus->hw->data_cmd = cmd;
+        bus->desc.issued++;
     }
     if (bus->desc.issued == bus->desc.length) {
         bus->hw->intr_mask &= ~I2C_IC_INTR_MASK_M_TX_EMPTY_BITS;
