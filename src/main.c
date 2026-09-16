@@ -40,18 +40,29 @@ void configure_systick(u8 cycles) {
 
 static inline void delay_ms(u32 ms_to_wait);
 
+static void log_fault(Writer *writer, i2c_lane_t lane);
 static volatile bme280_raw_data_t raw_data;
 static b32 bme280_is_configged = FALSE;
 volatile u32 ms = 0;
 volatile u32 next = 500;
+static b32 have_raw = FALSE;
+
+typedef enum {
+    APP_IDLE,
+    APP_START_READ,
+    APP_READING,
+    APP_WRITING,
+} app_state;
+
+static app_state main_state = APP_IDLE;
 
 void SYSTICK_Handler() {
     ms++;
     if ((i32)(ms - next) >= 0) {
         next += 500;
         sio_hw->gpio_togl = 1 << PIN25;
-        if (bme280_is_configged) {
-            bme280_start_read_raw_data(&raw_data);
+        if (bme280_is_configged && main_state == APP_IDLE) {
+            main_state = APP_START_READ;
         }
     }
 }
@@ -161,26 +172,63 @@ void main() {
     flush(rtt_writer);
 
     for (;;) {
-        i2c_state i2c1_state = i2c_poll_state(i2c1_cfg.lane);
-        if (i2c1_state == I2C_DONE) {
-            bme280_final_data data = bme280_compensate_data(&calib_params, &raw_data);
-            i2c_release(i2c1_cfg.lane);
-            print(rtt_writer, ANSI_RETURN_CARRIAGE "readout: temp: {d}, press: {d}, hum: {d}\n", data.temp, data.press, data.hum);
-
-        } else if (i2c1_state == I2C_ERROR) {
-            print(rtt_writer, "write err fault={u:x} abrt={u:x}\n", i2c_get_fault(i2c1_cfg.lane), i2c_get_abrt_source(i2c1_cfg.lane));
-
-#if I2C_DEBUG
-            print(rtt_writer, "hits={u} stat={u:x} mask={u:x}\n", dbg.isr_hits, dbg.intr_stat, dbg.intr_mask);
-            print(rtt_writer, "state={u} rxflr={u} txflr={u}\n", dbg.state, dbg.rxflr, dbg.txflr);
-#endif
-
-            flush(rtt_writer);
-            i2c_release(i2c1_cfg.lane);
-            PANIC;
+        switch (main_state) {
+        case APP_START_READ: {
+            if (bme280_start_read_raw_data(&raw_data) == 0) {
+                //render last farme
+                //
+                main_state = APP_READING;
+            }
+            break;
         }
-        flush(rtt_writer);
-        WFI;
+
+        case APP_READING: {
+            i2c_state i2c1_state = i2c_poll_state(i2c1_cfg.lane);
+
+            if (i2c1_state == I2C_READING) { //still reading
+                break;
+            }
+
+            if (i2c1_state == I2C_DONE) { //no error
+                have_raw = TRUE;
+
+            } else if (i2c1_state == I2C_ERROR) {
+                log_fault(rtt_writer, i2c1_cfg.lane);
+            }
+
+            if (TRUE) { // here we would start writing the frame
+                if (have_raw) {
+                    bme280_final_data data = bme280_compensate_data(&calib_params, &raw_data);
+                    have_raw = FALSE;
+                    print(rtt_writer, ANSI_RETURN_CARRIAGE "readout: temp: {d}, press: {d}, hum: {d}\n", data.temp, data.press, data.hum);
+                    flush(rtt_writer);
+                }
+                main_state = APP_WRITING;
+            }
+
+            i2c_release(i2c1_cfg.lane);
+            break;
+        }
+
+        case APP_WRITING: {
+            i2c_state i2c1_state = i2c_poll_state(i2c1_cfg.lane);
+
+            if (i2c1_state == I2C_WRITING) { // not done yet
+                break;
+            }
+
+            if (i2c1_state != I2C_DONE) {
+                log_fault(rtt_writer, i2c1_cfg.lane);
+            }
+            i2c_release(i2c1_cfg.lane);
+            main_state = APP_IDLE;
+            break;
+        }
+
+        case APP_IDLE:
+            WFI;
+            break;
+        }
     }
 }
 
@@ -189,4 +237,14 @@ static inline void delay_ms(u32 ms_to_wait) {
     while ((i32)(ms - wait_until) < 0) {
         WFI;
     }
+}
+
+static void log_fault(Writer *writer, i2c_lane_t lane) {
+    print(writer, "write err fault={u:x} abrt={u:x}\n", i2c_get_fault(lane), i2c_get_abrt_source(lane));
+
+#if I2C_DEBUG
+    print(writer, "hits={u} stat={u:x} mask={u:x}\n", dbg.isr_hits, dbg.intr_stat, dbg.intr_mask);
+    print(writer, "state={u} rxflr={u} txflr={u}\n", dbg.state, dbg.rxflr, dbg.txflr);
+#endif
+    flush(writer);
 }
