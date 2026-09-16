@@ -6,6 +6,8 @@
 #include <hardware/regs/intctrl.h>
 #include <hardware/structs/i2c.h>
 #include <hardware/structs/m33.h>
+#include <hardware/structs/dma.h>
+#include <hardware/regs/dreq.h>
 #include "addresses.h"
 
 #define I2C_RESTART_READ_MASK (I2C_IC_DATA_CMD_CMD_BITS | I2C_IC_DATA_CMD_RESTART_BITS)

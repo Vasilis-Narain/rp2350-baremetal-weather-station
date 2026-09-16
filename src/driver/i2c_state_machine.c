@@ -37,7 +37,7 @@
  *
 */
 extern void resets_clear(u32 mask);
-static void pump_tx_write(i2c_bus *bus);
+static void pump_tx_write_alternating(i2c_bus *bus);
 static void pump_tx_read(i2c_bus *bus);
 static void drain_rx(i2c_bus *bus);
 static void clear_rx(i2c_bus *bus);
@@ -100,10 +100,10 @@ void i2c_init_master(i2c_config *cfg) {
 
     switch (lane) {
     case I2C0:
-        resets_clear(RESETS_RESET_I2C0_BITS);
+        resets_clear(RESETS_RESET_I2C0_BITS | RESETS_RESET_DMA_BITS);
         break;
     case I2C1:
-        resets_clear(RESETS_RESET_I2C1_BITS);
+        resets_clear(RESETS_RESET_I2C1_BITS | RESETS_RESET_DMA_BITS);
         break;
     }
 
@@ -237,7 +237,7 @@ b32 i2c_start_bulk_read_async(i2c_lane_t lane, u32 target_address, u8 reg_addr, 
     return 0;
 }
 
-b32 i2c_start_bulk_write_alternating_asyn(i2c_lane_t lane, u32 target_address, i2c_address_data_pair_array *input) {
+b32 i2c_start_bulk_write_alternating_async(i2c_lane_t lane, u32 target_address, i2c_address_data_pair_array *input) {
     i2c_bus *bus = &buses[lane];
     if (bus->state != I2C_IDLE) {
         return I2C_BUS_BUSY;
@@ -257,6 +257,29 @@ b32 i2c_start_bulk_write_alternating_asyn(i2c_lane_t lane, u32 target_address, i
     bus->state = I2C_WRITING;
     bus->hw->intr_mask |= (I2C_IC_INTR_MASK_M_TX_EMPTY_BITS);
 
+    return 0;
+}
+
+b32 i2c_start_bulk_write_dma(i2c_lane_t lane, u32 target_address, u16 *commands, u32 count, u32 dma_channel) {
+    i2c_bus *bus = &buses[lane];
+    if (bus->state != I2C_IDLE) {
+        return I2C_BUS_BUSY;
+    }
+
+    i2c_set_target(bus, target_address);
+    bus->state = I2C_WRITING;
+    u32 data_request = (lane == I2C0) ? DREQ_I2C0_TX : DREQ_I2C1_TX;
+
+    dma_hw->ch[dma_channel].read_addr = (u32)commands;
+    dma_hw->ch[dma_channel].write_addr = (u32)&bus->hw->data_cmd;
+    dma_hw->ch[dma_channel].transfer_count = count;
+
+    dma_hw->ch[dma_channel].ctrl_trig = ((DMA_CH0_CTRL_TRIG_INCR_READ_BITS) |
+                                         (DMA_CH0_CTRL_TRIG_DATA_SIZE_VALUE_SIZE_HALFWORD << DMA_CH0_CTRL_TRIG_DATA_SIZE_LSB) |
+                                         (data_request << DMA_CH0_CTRL_TRIG_TREQ_SEL_LSB) |
+                                         (DMA_CH0_CTRL_TRIG_EN_BITS));
+
+    bus->hw->dma_cr = I2C_IC_DMA_CR_TDMAE_BITS;
     return 0;
 }
 
@@ -313,7 +336,7 @@ void i2c_irq(i2c_bus *bus) {
         if (bus->state == I2C_READING) {
             pump_tx_read(bus);
         } else if (bus->state == I2C_WRITING) {
-            pump_tx_write(bus);
+            pump_tx_write_alternating(bus);
         }
     }
 
@@ -373,7 +396,7 @@ static void pump_tx_read(i2c_bus *bus) {
     }
 }
 
-static void pump_tx_write(i2c_bus *bus) {
+static void pump_tx_write_alternating(i2c_bus *bus) {
     while ((bus->desc.issued < bus->desc.length) && (bus->hw->status & I2C_IC_STATUS_TFNF_BITS)) { // same as TX_EMPTY interrupt
         u32 cmd = 0;
         if (!bus->desc.write_is_data) {

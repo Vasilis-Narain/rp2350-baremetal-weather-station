@@ -50,4 +50,14 @@ usize strlen(const char *str);                      // optionally provide own im
 extern __attribute__((noreturn)) void panic();
 #define PANIC panic()
 
+extern void writer_error(const char *str, u32 length);
+
+#define RT_ASSERT(expr, msg)                                            \
+    do {                                                                \
+        if (!expr) {                                                    \
+            writer_error("ASSERT:: " msg, sizeof("ASSERT:: " msg) - 1); \
+            PANIC;                                                      \
+        }                                                               \
+    } while (0)
+
 #define I2C_DEBUG 1 // 0 for off
