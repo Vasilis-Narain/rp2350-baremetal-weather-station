@@ -12,6 +12,9 @@
 #include "rtt.h"
 #include "driver/i2c_state_machine.h"
 #include "driver/bme280.h"
+#include "driver/oled.h"
+
+#include "flower.h"
 
 #define SYST_CYCLES 12
 #define PIN25 25
@@ -34,13 +37,15 @@ static inline void delay_ms(u32 ms_to_wait);
 static void log_fault(Writer *writer, i2c_lane_t lane);
 static void log_result(Writer *writer, bme280_final_data *data);
 
-// globals
-static volatile bme280_raw_data_t raw_data;
-static b32 bme280_is_configged = FALSE;
+// statics and globals
 volatile u32 ms = 0;
 volatile u32 next = 500;
+static volatile bme280_raw_data_t raw_data;
+static b32 bme280_is_configged = FALSE;
+static b32 oled_is_configged = FALSE;
 static b32 have_raw = FALSE;
 static app_state main_state = APP_IDLE;
+static const u8 oled_init_commands[] = OLED_DEFAULT_INIT_CMD_LIST;
 
 /* clk_sys must already be configured. Usually done in `crt0`*/
 void configure_systick(u8 cycles) {
@@ -104,17 +109,9 @@ void main() {
         .scl_pin = GP15,
     };
 
+    // I2C master enable
     i2c_init_master(&i2c1_cfg);
-
-    write_all(rtt_writer, "\nProbing I2C Peripherals:\n");
-    for (u8 i = I2C_MIN_TARGET_ADDRESS; i <= I2C_MAX_TARGET_ADDRESS; i++) {
-        b32 result = i2c_probe(i2c1_cfg.lane, i);
-        if (result) {
-            print(rtt_writer, "  probed address: {u:xb}\n", i);
-            flush(rtt_writer);
-        }
-    }
-
+    i2c_bus_probe(rtt_writer, i2c1_cfg.lane);
     i2c_irq_enable(i2c1_cfg.lane);
 
     bme280_set_lane(i2c1_cfg.lane);
@@ -148,7 +145,7 @@ void main() {
     i2c_start_bulk_read_async(i2c1_cfg.lane, BME280_I2C_ADDR_PRIM, BME280_REG_CTRL_HUM, readback, 4); //0xf2..0xf5
     i32 readback_err = i2c_wait_completion(i2c1_cfg.lane);
     if (readback_err != 0) {
-        print(rtt_writer, "set_config error: {d}\n", readback_err);
+        print(rtt_writer, "set_config error: {u:x}\n", readback_err);
         log_fault(rtt_writer, i2c1_cfg.lane);
         PANIC;
     }
@@ -163,16 +160,25 @@ void main() {
         flush(rtt_writer);
         PANIC;
     }
-
-    // dont forget to flush :D
     flush(rtt_writer);
+
+    // Initialise OLED
+    oled_set_i2c_statics(i2c1_cfg.lane, 0);
+    b32 oled_err = oled_init(oled_init_commands);
+    if (oled_err != 0) {
+        print(rtt_writer, "oled_init error: {u:x}\n", oled_err);
+        log_fault(rtt_writer, i2c1_cfg.lane);
+        PANIC;
+    } else {
+        write_all(rtt_writer, "OLED SETUP " ANSI_GREEN "OK" ANSI_CLEAR "\n\n\n");
+        oled_is_configged = TRUE;
+    }
 
     for (;;) {
         switch (main_state) {
         case APP_START_READ: {
             if (bme280_start_read_raw_data(&raw_data) == 0) {
-                //render last farme
-                //
+                oled_build_tx_buffer(flower, 512);
                 main_state = APP_READING;
             }
             break;
@@ -192,7 +198,7 @@ void main() {
                 log_fault(rtt_writer, i2c1_cfg.lane);
             }
 
-            if (TRUE) { // here we would start writing the frame
+            if (oled_start_dma_write() == 0) { // here we would start writing the frame
                 if (have_raw) {
                     bme280_final_data data = bme280_compensate_data(&calib_params, &raw_data);
                     have_raw = FALSE;
@@ -212,11 +218,9 @@ void main() {
                 break;
             }
 
-            /*
             if (i2c1_state != I2C_DONE) {
                 log_fault(rtt_writer, i2c1_cfg.lane);
             }
-            */
 
             i2c_release(i2c1_cfg.lane);
             main_state = APP_IDLE;
@@ -238,7 +242,9 @@ static inline void delay_ms(u32 ms_to_wait) {
 }
 
 static void log_fault(Writer *writer, i2c_lane_t lane) {
-    print(writer, "i2c error: fault={u:x} abrt={u:x}\n", i2c_get_fault(lane), i2c_get_abrt_source(lane));
+    u32 fault = i2c_get_fault(lane);
+    u32 abrt = i2c_get_abrt_source(lane);
+    print(writer, "i2c error: fault={u:x} abrt={u:x}\n", fault, abrt);
 
 #if I2C_DEBUG
     print(writer, "hits={u} stat={u:x} mask={u:x}\n", dbg.isr_hits, dbg.intr_stat, dbg.intr_mask);

@@ -1,5 +1,4 @@
 #include "i2c_state_machine.h"
-#include "../Writer.h"
 /*
     * Interrupt notes:
     *  Use NVIC_ISER to set/read enabled state of interrupts.
@@ -181,8 +180,6 @@ i32 i2c_release(i2c_lane_t lane) {
     return 0;
 }
 
-// DEBUG: storm guard snapshot, remove once write is fixed
-
 #if I2C_DEBUG
 debug_stats dbg;
 #endif
@@ -210,6 +207,17 @@ b32 i2c_probe(i2c_lane_t lane, u8 target_address) {
     }
     while (bus->hw->status & I2C_IC_STATUS_ACTIVITY_BITS) {}
     return present;
+}
+
+void i2c_bus_probe(Writer *writer, i2c_lane_t lane) {
+    write_all(writer, "\nProbing I2C Peripherals:\n");
+    for (u8 i = I2C_MIN_TARGET_ADDRESS; i <= I2C_MAX_TARGET_ADDRESS; i++) {
+        b32 result = i2c_probe(lane, i);
+        if (result) {
+            print(writer, "  probed address: {u:xb}\n", i);
+            flush(writer);
+        }
+    }
 }
 
 b32 i2c_start_bulk_read_async(i2c_lane_t lane, u32 target_address, u8 reg_addr, volatile u8 *buf, u32 len) {
@@ -250,7 +258,7 @@ b32 i2c_start_bulk_write_alternating_async(i2c_lane_t lane, u32 target_address, 
         .buf = input->data,
         .write_registers = input->addresses,
         .length = input->capacity,
-        .write_is_alternating = TRUE,
+        .write_type = I2C_ALTERNATING,
     };
 
     bus->isr_hits = 0;
@@ -272,7 +280,7 @@ b32 i2c_start_bulk_write_async(i2c_lane_t lane, u32 target_address, u8 *commands
     bus->desc = (i2c_descriptor){
         .write_registers = commands,
         .length = len,
-        .write_is_alternating = FALSE,
+        .write_type = I2C_SEQUENTIAL,
     };
 
     bus->isr_hits = 0;
@@ -290,6 +298,9 @@ b32 i2c_start_bulk_write_dma(i2c_lane_t lane, u32 target_address, u16 *commands,
     }
 
     i2c_set_target(bus, target_address);
+    bus->desc = (i2c_descriptor){
+        .write_type = I2C_DMA,
+    };
     bus->state = I2C_WRITING;
     u32 data_request = (lane == I2C0) ? DREQ_I2C0_TX : DREQ_I2C1_TX;
 
@@ -311,13 +322,7 @@ void i2c_irq(i2c_bus *bus) {
 
     if (++bus->isr_hits > 10000) {
 
-#if I2C_DEBUG
-        dbg.intr_stat = irq_status;
-        dbg.intr_mask = bus->hw->intr_mask;
-        dbg.rxflr = bus->hw->rxflr;
-        dbg.txflr = bus->hw->txflr;
-        dbg.state = bus->state;
-#endif
+        DEBUG(irq_status, bus);
 
         bus->hw->intr_mask = 0;
         bus->desc.fault |= I2C_FAULT_STORM;
@@ -330,6 +335,9 @@ void i2c_irq(i2c_bus *bus) {
         (void)bus->hw->clr_tx_abrt;
         (void)bus->hw->clr_stop_det;
         if (bus->state == I2C_READING || bus->state == I2C_WRITING) {
+
+            DEBUG(irq_status, bus);
+
             bus->desc.abrt_source = abrt_source;
             bus->hw->intr_mask &= ~(I2C_IC_INTR_MASK_M_TX_EMPTY_BITS | I2C_IC_INTR_MASK_M_RX_FULL_BITS);
             clear_rx(bus);
@@ -342,6 +350,9 @@ void i2c_irq(i2c_bus *bus) {
     if (irq_status & I2C_IC_INTR_STAT_R_RX_OVER_BITS) {
         (void)bus->hw->clr_rx_over;
         if (bus->state == I2C_READING) {
+
+            DEBUG(irq_status, bus);
+
             bus->desc.fault |= I2C_FAULT_OVERRUN;
             bus->state = I2C_ERROR;
         }
@@ -359,10 +370,15 @@ void i2c_irq(i2c_bus *bus) {
         if (bus->state == I2C_READING) {
             pump_tx_read(bus);
         } else if (bus->state == I2C_WRITING) {
-            if (bus->desc.write_is_alternating) {
-                pump_tx_write_alternating(bus);
-            } else {
+            switch (bus->desc.write_type) {
+            case I2C_SEQUENTIAL:
                 pump_tx_write(bus);
+                break;
+            case I2C_ALTERNATING:
+                pump_tx_write_alternating(bus);
+                break;
+            case I2C_DMA:
+                break;
             }
         }
     }

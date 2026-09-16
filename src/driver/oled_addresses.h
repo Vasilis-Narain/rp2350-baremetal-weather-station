@@ -79,8 +79,8 @@
     OLED_CMD_VAL_MUX_RATIO_32,                \
     OLED_CMD_SET_DISPLAY_OFFSET,              \
     OLED_CMD_VAL_DISPLAY_OFFSET_0,            \
-    OLED_CMD_SET_SEGMENT_REMAP_NORMAL,        \
-    OLED_CMD_SET_COM_SCAN_MODE_NORMAL,        \
+    OLED_CMD_SET_SEGMENT_REMAP_FLIPPED,       \
+    OLED_CMD_SET_COM_SCAN_MODE_REMAPPED,      \
     OLED_CMD_SET_COM_PIN_MAP,                 \
     OLED_CMD_VAL_COM_PIN_MAP_SEQUENTIAL,      \
     OLED_CMD_SET_CONTRAST,                    \

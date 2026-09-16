@@ -1,4 +1,5 @@
 #pragma once
+#include "../Writer.h"
 #include <type_alias.h>
 #include <hardware/structs/pads_bank0.h>
 #include <hardware/structs/io_bank0.h>
@@ -7,6 +8,7 @@
 #include <hardware/structs/i2c.h>
 #include <hardware/structs/m33.h>
 #include <hardware/structs/dma.h>
+
 #include <hardware/regs/dreq.h>
 #include "addresses.h"
 
@@ -71,11 +73,17 @@ typedef struct {
     u32 capacity;
 } i2c_address_data_pair_array;
 
+typedef enum {
+    I2C_SEQUENTIAL,
+    I2C_ALTERNATING,
+    I2C_DMA,
+} write_enum;
+
 typedef struct {
     volatile u8 *buf;
     u8 *write_registers;
     b32 write_is_data;
-    b32 write_is_alternating;
+    write_enum write_type;
     u32 issued;
     u32 received;
     u32 length;
@@ -108,6 +116,18 @@ typedef struct {
     volatile u32 state;
 } debug_stats;
 extern debug_stats dbg;
+
+static inline void i2c_debug_dump(u32 irq_status, i2c_bus *bus) {
+    dbg.intr_stat = irq_status;
+    dbg.intr_mask = bus->hw->intr_mask;
+    dbg.rxflr = bus->hw->rxflr;
+    dbg.txflr = bus->hw->txflr;
+    dbg.state = bus->state;
+}
+#define DEBUG(irq_status, bus) i2c_debug_dump(irq_status, bus)
+#else
+#define DEBUG(irq_status, bus) \
+    {}
 #endif
 
 #define I2C_INIT_SET (I2C_IC_CON_MASTER_MODE_VALUE_ENABLED |                    \
@@ -130,10 +150,12 @@ extern debug_stats dbg;
 #define I2C_BUS_BUSY -1
 #define I2C_RETRY_QUEUE_FULL -(1 << 1)
 
+void i2c_bus_probe(Writer *writer, i2c_lane_t lane);
 b32 i2c_probe(i2c_lane_t lane, u8 address);
 b32 i2c_start_bulk_read_async(i2c_lane_t lane, u32 target_address, u8 reg_addr, volatile u8 *buf, u32 len);
 b32 i2c_start_bulk_write_alternating_async(i2c_lane_t lane, u32 target_address, i2c_address_data_pair_array *input);
 b32 i2c_start_bulk_write_async(i2c_lane_t lane, u32 target_address, u8 *commands, u32 len);
+b32 i2c_start_bulk_write_dma(i2c_lane_t lane, u32 target_address, u16 *commands, u32 count, u32 dma_channel);
 void i2c_irq_enable(i2c_lane_t lane);
 u32 i2c_get_abrt_source(i2c_lane_t lane);
 u32 i2c_get_received(i2c_lane_t lane);
