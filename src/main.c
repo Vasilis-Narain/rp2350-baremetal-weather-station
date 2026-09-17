@@ -14,7 +14,7 @@
 #include "driver/bme280.h"
 #include "driver/oled.h"
 
-#include "flower.h"
+#include "baby_yoda.h"
 
 #define SYST_CYCLES 12
 #define PIN25 25
@@ -151,7 +151,7 @@ void main() {
     }
 
     if (readback[0] == config_data.ctrl_hum && readback[2] == config_data.ctrl_meas && readback[3] == config_data.config) {
-        write_all(rtt_writer, "\nBME280 SETUP " ANSI_GREEN "OK" ANSI_CLEAR "\n\n\n");
+        write_all(rtt_writer, "\nBME280 SETUP " ANSI_GREEN "OK" ANSI_CLEAR "\n");
         bme280_is_configged = TRUE;
     } else {
         write_all(rtt_writer, "\nBME280 SETUP " ANSI_RED "FAILED" ANSI_CLEAR "\n");
@@ -178,7 +178,7 @@ void main() {
         switch (main_state) {
         case APP_START_READ: {
             if (bme280_start_read_raw_data(&raw_data) == 0) {
-                oled_build_tx_buffer(flower, 512);
+                oled_build_tx_buffer(baby_yoda, 512);
                 main_state = APP_READING;
             }
             break;

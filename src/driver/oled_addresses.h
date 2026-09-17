@@ -58,6 +58,8 @@
 #define OLED_CMD_VAL_SET_DISPLAY_CLK_DIV_DEFAULT 0x80
 #define OLED_CMD_VAL_SET_CHARGE_PUMP_ENABLE 0x14
 
+#define OLED_FRAME_BUFFER_SIZE 512
+
 /* Software init flow
 * Set Mux Ratio
 * Set Display Offset
@@ -86,7 +88,7 @@
     OLED_CMD_SET_CONTRAST,                    \
     OLED_CMD_VAL_SET_CONTRAST_DEFAULT,        \
     OLED_CMD_DISPLAY_RAM,                     \
-    OLED_CMD_DISPLAY_NORMAL,                  \
+    OLED_CMD_DISPLAY_INVERTED,                \
     OLED_CMD_SET_MEMORY_ADDR_MODE,            \
     OLED_CMD_VAL_MEMORY_ADDR_MODE_HORZ,       \
     OLED_CMD_SET_DISPLAY_CLK_DIV,             \

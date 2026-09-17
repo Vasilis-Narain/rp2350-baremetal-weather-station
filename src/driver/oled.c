@@ -1,24 +1,6 @@
 #include "oled.h"
 
-// Display size 128 x 32 (last 32 rows of internal ram are ignored)
-// Ram is divided in 8 pages.
-//
-// Page0 (com0-com7)
-// Page 1 (com1-com15) etc.
-//
-// In more detail:
-//
-//     | Seg0   | Seg1   | ... | Seg126   | Seg127 |
-//     | lsb d0 | lsb d0 | ... |          |        | com 0
-//     | ...    | ...    | ... | ...      |        | com 1
-// Page0    ...
-//     | msb d7 | msb d7 | ... | ...      |        | com 7
-//
-//        ^ byte comes here
-
-#define OLED_TX_BUFFER_SIZE 513
-
-static u16 oled_tx[OLED_TX_BUFFER_SIZE];
+static u16 oled_tx[OLED_FRAME_BUFFER_SIZE + 1];
 static i2c_lane_t lane;
 static u32 dma_channel;
 
@@ -34,7 +16,7 @@ void oled_build_tx_buffer(const u8 *frame_buffer, u32 len) {
 
 //b32 i2c_start_bulk_write_dma(i2c_lane_t lane, u32 target_address, u16 *commands, u32 count, u32 dma_channel)
 b32 oled_start_dma_write() {
-    if (i2c_start_bulk_write_dma(lane, OLED_I2C_ADDRESS, oled_tx, OLED_TX_BUFFER_SIZE, dma_channel) != 0) {
+    if (i2c_start_bulk_write_dma(lane, OLED_I2C_ADDRESS, oled_tx, OLED_FRAME_BUFFER_SIZE + 1, dma_channel) != 0) {
         return I2C_BUS_BUSY;
     }
     return 0;
