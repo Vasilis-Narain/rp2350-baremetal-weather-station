@@ -163,8 +163,7 @@ void main() {
     flush(rtt_writer);
 
     // Initialise OLED
-    oled_set_i2c_statics(i2c1_cfg.lane, 0);
-    b32 oled_err = oled_init(oled_init_commands);
+    b32 oled_err = oled_init(oled_init_commands, i2c1_cfg.lane, 0);
     if (oled_err != 0) {
         print(rtt_writer, "oled_init error: {u:x}\n", oled_err);
         log_fault(rtt_writer, i2c1_cfg.lane);
@@ -178,7 +177,8 @@ void main() {
         switch (main_state) {
         case APP_START_READ: {
             if (bme280_start_read_raw_data(&raw_data) == 0) {
-                oled_build_tx_buffer(baby_yoda, 512);
+                oled_draw_bitmap(0, 0, 128, 32, baby_yoda);
+                oled_commit_tx_buffer();
                 main_state = APP_READING;
             }
             break;
