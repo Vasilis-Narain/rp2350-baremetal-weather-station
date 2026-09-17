@@ -5,7 +5,7 @@
 
 #pragma once
 #include <type_alias.h>
-#define FLOWER_HEIGHT 32
-#define FLOWER_WIDTH 128
+#define YODA_HEIGHT 32
+#define YODA_WIDTH 128
 
-extern const u8 flower[512];
+extern const u8 baby_yoda[512];
