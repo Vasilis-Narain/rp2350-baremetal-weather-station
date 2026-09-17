@@ -3,8 +3,6 @@ LDSCRIPT := link.ld
 BUILD    := build
 SRC := src
 
-# Recursive wildcard: make has no built-in for this. Walks every directory
-# under $1 and returns files matching $2, so src/driver/i2c.c is picked up.
 rwildcard = $(foreach d,$(wildcard $(1:=/*)),$(call rwildcard,$d,$2) $(filter $(subst *,%,$2),$d))
 SRCS      := $(call rwildcard,$(SRC),*.c) $(call rwildcard,$(SRC),*.S)
 SRCS_RAW  := $(SRCS:$(SRC)/%=%)
