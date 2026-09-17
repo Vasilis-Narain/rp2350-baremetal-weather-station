@@ -84,6 +84,7 @@ typedef struct {
     u8 *write_registers;
     b32 write_is_data;
     write_enum write_type;
+    u32 dma_channel;
     u32 issued;
     u32 received;
     u32 length;

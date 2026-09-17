@@ -41,6 +41,7 @@ static void pump_tx_write(i2c_bus *bus);
 static void pump_tx_read(i2c_bus *bus);
 static void drain_rx(i2c_bus *bus);
 static void clear_rx(i2c_bus *bus);
+static void abort_dma(i2c_bus *bus);
 
 static i2c_bus buses[] = {
     [I2C0] = {.hw = i2c0_hw, .last_tar = ~0},
@@ -300,6 +301,7 @@ b32 i2c_start_bulk_write_dma(i2c_lane_t lane, u32 target_address, u16 *commands,
     i2c_set_target(bus, target_address);
     bus->desc = (i2c_descriptor){
         .write_type = I2C_DMA,
+        .dma_channel = dma_channel,
     };
     bus->state = I2C_WRITING;
     u32 data_request = (lane == I2C0) ? DREQ_I2C0_TX : DREQ_I2C1_TX;
@@ -332,6 +334,10 @@ void i2c_irq(i2c_bus *bus) {
 
     if (irq_status & I2C_IC_INTR_STAT_R_TX_ABRT_BITS) {
         u32 abrt_source = bus->hw->tx_abrt_source;
+        if (bus->desc.write_type == I2C_DMA) {
+            bus->hw->dma_cr = 0;
+            abort_dma(bus);
+        }
         (void)bus->hw->clr_tx_abrt;
         (void)bus->hw->clr_stop_det;
         if (bus->state == I2C_READING || bus->state == I2C_WRITING) {
@@ -396,11 +402,25 @@ void i2c_irq(i2c_bus *bus) {
         }
         if (bus->state == I2C_WRITING) {
             clear_rx(bus);
-            if (bus->desc.issued == bus->desc.length) {
-                bus->state = I2C_DONE;
-            } else {
-                bus->desc.fault |= I2C_FAULT_EARLY_STOP;
-                bus->state = I2C_ERROR;
+            switch (bus->desc.write_type) {
+            case I2C_DMA:
+                bus->hw->dma_cr = 0;
+                if (dma_hw->ch[bus->desc.dma_channel].ctrl_trig & DMA_CH0_CTRL_TRIG_BUSY_BITS) {
+                    abort_dma(bus);
+                    bus->desc.fault |= I2C_FAULT_EARLY_STOP;
+                    bus->state = I2C_ERROR;
+                } else {
+                    bus->state = I2C_DONE;
+                }
+                break;
+            default:
+                if (bus->desc.issued == bus->desc.length) {
+                    bus->state = I2C_DONE;
+                } else {
+                    bus->desc.fault |= I2C_FAULT_EARLY_STOP;
+                    bus->state = I2C_ERROR;
+                }
+                break;
             }
         }
     }
@@ -414,6 +434,11 @@ void I2C0_IRQ_Handler() {
 }
 void I2C1_IRQ_Handler() {
     i2c_irq(&buses[I2C1]);
+}
+
+static void abort_dma(i2c_bus *bus) {
+    dma_hw->abort = 1u << bus->desc.dma_channel;
+    while (dma_hw->abort & (1u << bus->desc.dma_channel)) {}
 }
 
 static void drain_rx(i2c_bus *bus) {
