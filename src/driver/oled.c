@@ -53,6 +53,7 @@ void oled_set_pixel(u32 x, u32 y, b32 set) {
 
     u16 byte_index = (y >> 3) * OLED_WIDTH + x;
     u16 bit_index = (y & 0x7);
+
     if (set) {
         frame_buffer[byte_index] |= (1u << bit_index);
     } else {
@@ -74,7 +75,7 @@ void oled_draw_bitmap(u32 x, u32 y, u32 width, u32 height, const u8 *bitmap) {
         if (running_y >= height) {
             break;
         }
-        u8 value = oled_get_pixel_from_bitmap(running_x, running_y, width, bitmap);
+        u8 value = oled_get_pixel_from_bitmap(running_x - x, running_y - y, width, bitmap);
         oled_set_pixel(running_x, running_y, (b32)value);
     }
 }
