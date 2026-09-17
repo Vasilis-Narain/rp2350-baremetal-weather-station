@@ -2,6 +2,9 @@
 #pragma once
 #include <type_alias.h>
 
+#define OLED_WIDTH 128
+#define OLED_HEIGHT 32
+
 // SLA (0x3C) + WRITE_MODE (0x00) =  0x78 (0b01111000)
 #define OLED_I2C_ADDRESS 0x3C
 
