@@ -91,7 +91,7 @@
     OLED_CMD_SET_CONTRAST,                    \
     OLED_CMD_VAL_SET_CONTRAST_DEFAULT,        \
     OLED_CMD_DISPLAY_RAM,                     \
-    OLED_CMD_DISPLAY_INVERTED,                \
+    OLED_CMD_DISPLAY_NORMAL,                  \
     OLED_CMD_SET_MEMORY_ADDR_MODE,            \
     OLED_CMD_VAL_MEMORY_ADDR_MODE_HORZ,       \
     OLED_CMD_SET_DISPLAY_CLK_DIV,             \

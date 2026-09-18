@@ -19,7 +19,7 @@ static i32 print_uint_dec(Writer *writer, u32 num);
 static char next(const char **fmt, const char *end);
 static u32 unsigned_trunc(int_size size, u32 num);
 
-void writer_init(Writer *writer, char *buf, u32 capacity, void (*flush_fn)(Writer *)) {
+void writer_init(Writer *writer, char *buf, u32 capacity, void (*flush_fn)(Writer *, va_list)) {
     if (!writer || !buf || !capacity || !flush_fn) {
         PANIC;
     }
@@ -29,12 +29,15 @@ void writer_init(Writer *writer, char *buf, u32 capacity, void (*flush_fn)(Write
     writer->flush_fn = flush_fn;
 }
 
-void flush(Writer *writer) {
+void flush(Writer *writer, ...) {
     if (!writer || !writer->buf || !writer->capacity || !writer->flush_fn) {
         PANIC;
     }
-    writer->flush_fn(writer);
+    va_list args;
+    va_start(args, writer);
+    writer->flush_fn(writer, args);
     writer->current_size = 0;
+    va_end(args);
 }
 
 i32 writer_write(Writer *writer, const char *str, u32 length) {

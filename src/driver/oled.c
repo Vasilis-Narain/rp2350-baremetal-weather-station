@@ -11,6 +11,17 @@ static u16 *const frame_buffer = oled_tx_buffer + 1;
 static i2c_lane_t lane;
 static u32 dma_channel;
 
+void oled_flush(Writer *writer, va_list args) {
+    oled_write_desc desc = (oled_write_desc){
+        .x = va_arg(args, u32),
+        .y = va_arg(args, u32),
+        .size = va_arg(args, u32),
+        .inverted = va_arg(args, u32),
+    };
+    oled_draw_text(desc.x, desc.y, desc.size, writer->buf, writer->current_size, desc.inverted);
+    writer->current_size = 0;
+}
+
 void oled_commit_tx_buffer() {
     oled_tx_buffer[OLED_FRAME_BUFFER_SIZE] |= I2C_IC_DATA_CMD_STOP_BITS;
 }
@@ -61,23 +72,62 @@ void oled_set_pixel(u32 x, u32 y, b32 set) {
     }
 }
 
-void oled_draw_bitmap(u32 x, u32 y, u32 width, u32 height, const u8 *bitmap) {
-    u32 running_x = x;
-    u32 running_y = y;
-    u32 total_len = width * height;
-
-    for (; running_x < total_len; running_x++) {
-
-        if (running_x >= width) {
-            running_x = x;
-            running_y++;
-        }
-        if (running_y >= height) {
+void oled_draw_bitmap(u32 x, u32 y, u32 width, u32 height, const u8 *bitmap, b32 inverted) {
+    for (u32 by = 0; by < height; by++) {
+        if (y + by >= OLED_HEIGHT) {
             break;
         }
-        u8 value = oled_get_pixel_from_bitmap(running_x - x, running_y - y, width, bitmap);
-        oled_set_pixel(running_x, running_y, (b32)value);
+        for (u32 bx = 0; bx < width; bx++) {
+            if (x + bx >= OLED_WIDTH) {
+                break;
+            }
+            b32 value = oled_get_pixel_from_bitmap(bx, by, width, bitmap);
+            if (inverted) {
+                value = !value;
+            }
+            oled_set_pixel(x + bx, y + by, value);
+        }
     }
 }
 
-void oled_draw_text(u32 x, u32 y, u32 size, char *text);
+void oled_draw_text(u32 x, u32 y, u32 size, char *text, u32 len, b32 inverted) {
+    const font_descriptor *desc;
+    const u8 *character;
+
+    u32 running_x = x;
+    u32 running_y = y;
+
+    switch (size) {
+    default:
+        desc = &TERMINUS_FONT_DESCRIPTOR;
+        break;
+    case 16:
+        desc = &IBM_VGA_NORMAL_FONT_DESCRIPTOR;
+        break;
+    }
+
+    for (u32 i = 0; i < len; i++) {
+
+        if ((running_x + desc->font_width > OLED_WIDTH) || text[i] == '\n') {
+            if ((i + 1 < len) && (text[i] == '\n')) {
+                text++;
+            }
+            running_x = x;
+            running_y += desc->advance_y;
+        }
+
+        if (running_y >= OLED_HEIGHT) {
+            return;
+        }
+
+        // Anything outside the font's range falls back to space rather than
+        // indexing past the end of the array.
+        u32 c = (u8)text[i];
+        u32 glyph = (c >= LOCHAR && c <= desc->hichar) ? c - LOCHAR : 0;
+        character = desc->font + glyph * desc->bytes_per_glyph;
+
+        oled_draw_bitmap(running_x, running_y, desc->font_width, desc->font_height, character, inverted);
+
+        running_x += desc->font_width;
+    }
+}

@@ -14,7 +14,7 @@
 #include "driver/bme280.h"
 #include "driver/oled.h"
 
-#include "baby_yoda.h"
+//#include "baby_yoda.h"
 
 #define SYST_CYCLES 12
 #define PIN25 25
@@ -24,6 +24,8 @@
 #define SYSTICK_FREQ_HZ 1000
 #define EXT_CLK_FREQ_HZ 1000000
 #define SYSTICK_TOP (EXT_CLK_FREQ_HZ / SYSTICK_FREQ_HZ - 1)
+
+#define MAIN_PERIOD_MS 500
 
 typedef enum {
     APP_IDLE,
@@ -36,11 +38,19 @@ typedef enum {
 static inline void delay_ms(u32 ms_to_wait);
 static void log_fault(Writer *writer, i2c_lane_t lane);
 static void log_result(Writer *writer, bme280_final_data *data);
+static void display_result(Writer *writer, bme280_final_data *data, oled_write_desc *desc);
 
 // statics and globals
+static oled_write_desc default_oled_desc = (oled_write_desc){
+    .inverted = FALSE,
+    .size = 12,
+    .x = 0,
+    .y = 0,
+};
 volatile u32 ms = 0;
 volatile u32 next = 500;
 static volatile bme280_raw_data_t raw_data;
+static bme280_final_data last_data;
 static b32 bme280_is_configged = FALSE;
 static b32 oled_is_configged = FALSE;
 static b32 have_raw = FALSE;
@@ -66,7 +76,7 @@ void configure_systick(u8 cycles) {
 void SYSTICK_Handler() {
     ms++;
     if ((i32)(ms - next) >= 0) {
-        next += 500;
+        next += MAIN_PERIOD_MS;
         sio_hw->gpio_togl = 1 << PIN25;
         if (bme280_is_configged && main_state == APP_IDLE) {
             main_state = APP_START_READ;
@@ -94,10 +104,14 @@ void delay_5_us() {
 
 void main() {
     char writer_buf[RTT_WRITER_MAX_BUFFER_SIZE];
+    char oled_buf[512];
     Writer rtt_writer_instance;
     Writer *rtt_writer = &rtt_writer_instance;
+    Writer oled_writer_instance;
+    Writer *oled_writer = &oled_writer_instance;
 
     WRITER_INIT(rtt_writer, writer_buf, rtt_flush);
+    WRITER_INIT(oled_writer, oled_buf, oled_flush);
     write_all(rtt_writer, "\nRTT " ANSI_GREEN "OK\n" ANSI_CLEAR);
     flush(rtt_writer);
 
@@ -190,7 +204,9 @@ void main() {
         switch (main_state) {
         case APP_START_READ: {
             if (bme280_start_read_raw_data(&raw_data) == 0) {
-                oled_draw_bitmap(0, 0, 128, 32, baby_yoda);
+                //oled_draw_bitmap(0, 0, 128, 32, baby_yoda, TRUE);
+                display_result(oled_writer, &last_data, &default_oled_desc);
+                //oled_draw_text(0, 0, 12, "hello world!", sizeof("hello wolrd!") - 1, FALSE);
                 oled_commit_tx_buffer();
                 main_state = APP_READING;
             }
@@ -213,9 +229,9 @@ void main() {
 
             if (oled_start_dma_write() == 0) { // here we would start writing the frame
                 if (have_raw) {
-                    bme280_final_data data = bme280_compensate_data(&calib_params, &raw_data);
+                    last_data = bme280_compensate_data(&calib_params, &raw_data);
                     have_raw = FALSE;
-                    log_result(rtt_writer, &data);
+                    log_result(rtt_writer, &last_data);
                 }
                 main_state = APP_WRITING;
             }
@@ -269,4 +285,15 @@ static void log_fault(Writer *writer, i2c_lane_t lane) {
 static void log_result(Writer *writer, bme280_final_data *data) {
     print(writer, ANSI_RETURN_CARRIAGE "readout: temp: {d}, press: {d}, hum: {d}\n", data->temp, data->press, data->hum);
     flush(writer);
+}
+
+static void display_result(Writer *writer, bme280_final_data *data, oled_write_desc *desc) {
+    i32 temp_int = data->temp / 100;
+    u32 temp_frac = (data->temp < 0) ? (u32)((-1 * data->temp) % 100) : (u32)(data->temp % 100);
+    i32 press_int = data->press / 100;
+    u32 press_frac = data->press % 100;
+    i32 hum_int = data->hum / 1024;
+    u32 hum_frac = (data->hum % 1024) / 10;
+    print(writer, "{d}.{d}C {d}.{d}rH\n{d}.{d}hPa", temp_int, temp_frac, hum_int, hum_frac, press_int, press_frac);
+    flush(writer, desc->x, desc->y, desc->size, desc->inverted);
 }

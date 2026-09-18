@@ -84,4 +84,4 @@ extern u32 rtt_bytes_dropped;
 
 u32 rtt_write(const char *str, u32 len, u8 channel);
 u32 rtt_read(char *buf, u32 max, u8 channel);
-void rtt_flush(Writer *writer);
+void rtt_flush(Writer *writer, va_list args);
