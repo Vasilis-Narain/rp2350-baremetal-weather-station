@@ -120,10 +120,13 @@ void oled_draw_text(u32 x, u32 y, FONTS font, char *text, u32 len, b32 inverted)
 
     for (u32 i = 0; i < len; i++) {
 
-        if ((running_x + desc->font_width > OLED_WIDTH) || text[i] == '\n') {
-            if ((i + 1 < len) && (text[i] == '\n')) {
-                text++;
-            }
+        if (text[i] == '\n') {
+            running_x = x;
+            running_y += desc->advance_y;
+            continue;
+        }
+
+        if ((running_x + desc->font_width > OLED_WIDTH)) {
             running_x = x;
             running_y += desc->advance_y;
         }
@@ -132,8 +135,6 @@ void oled_draw_text(u32 x, u32 y, FONTS font, char *text, u32 len, b32 inverted)
             return;
         }
 
-        // Anything outside the font's range falls back to space rather than
-        // indexing past the end of the array.
         u32 c = (u8)text[i];
         u32 glyph = (c >= LOCHAR && c <= desc->hichar) ? c - LOCHAR : 0;
         character = desc->font + glyph * desc->bytes_per_glyph;
