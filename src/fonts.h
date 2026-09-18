@@ -32,3 +32,21 @@ typedef struct {
 } font_descriptor;
 extern const font_descriptor TERMINUS_FONT_DESCRIPTOR;
 extern const font_descriptor IBM_VGA_NORMAL_FONT_DESCRIPTOR;
+
+// >>> generated: JMK_FONT BEGIN
+#define JMK_LOCHAR 32
+#define JMK_HICHAR 127 // inclusive, 96 glyphs
+#define JMK_FONT_WIDTH 5
+#define JMK_FONT_HEIGHT 16
+#define JMK_FONT_PAGES 2
+#define JMK_BYTES_PER_GLYPH (JMK_FONT_PAGES * JMK_FONT_WIDTH) // 10
+#define JMK_FONT_ADVANCE_Y 12
+extern const u8 JMK_FONT[];
+extern const font_descriptor JMK_FONT_DESCRIPTOR;
+// <<< generated: JMK_FONT END
+//
+typedef enum {
+    FONT_TERMINUS,
+    FONT_IBM,
+    FONT_JMK,
+} FONTS;

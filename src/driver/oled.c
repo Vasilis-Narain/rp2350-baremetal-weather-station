@@ -15,10 +15,10 @@ void oled_flush(Writer *writer, va_list args) {
     oled_write_desc desc = (oled_write_desc){
         .x = va_arg(args, u32),
         .y = va_arg(args, u32),
-        .size = va_arg(args, u32),
+        .font = (FONTS)va_arg(args, u32),
         .inverted = va_arg(args, u32),
     };
-    oled_draw_text(desc.x, desc.y, desc.size, writer->buf, writer->current_size, desc.inverted);
+    oled_draw_text(desc.x, desc.y, desc.font, writer->buf, writer->current_size, desc.inverted);
     writer->current_size = 0;
 }
 
@@ -90,19 +90,25 @@ void oled_draw_bitmap(u32 x, u32 y, u32 width, u32 height, const u8 *bitmap, b32
     }
 }
 
-void oled_draw_text(u32 x, u32 y, u32 size, char *text, u32 len, b32 inverted) {
+void oled_draw_text(u32 x, u32 y, FONTS font, char *text, u32 len, b32 inverted) {
     const font_descriptor *desc;
     const u8 *character;
 
     u32 running_x = x;
     u32 running_y = y;
 
-    switch (size) {
+    switch (font) {
     default:
         desc = &TERMINUS_FONT_DESCRIPTOR;
         break;
-    case 16:
+    case FONT_TERMINUS:
+        desc = &TERMINUS_FONT_DESCRIPTOR;
+        break;
+    case FONT_IBM:
         desc = &IBM_VGA_NORMAL_FONT_DESCRIPTOR;
+        break;
+    case FONT_JMK:
+        desc = &JMK_FONT_DESCRIPTOR;
         break;
     }
 
