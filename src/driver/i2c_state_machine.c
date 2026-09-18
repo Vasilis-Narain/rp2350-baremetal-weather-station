@@ -515,7 +515,7 @@ static void clear_rx(i2c_bus *bus) {
 
 static b32 i2c_bus_recovery(i2c_config *cfg) { // Recover i2c bus
     u32 sda_pin = cfg->sda_pin;
-    u32 scl_pin = cfg->sda_pin;
+    u32 scl_pin = cfg->scl_pin;
     u32 sda_mask = 1u << sda_pin;
     u32 scl_mask = 1u << scl_pin;
 
