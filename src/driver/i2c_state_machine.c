@@ -36,12 +36,16 @@
  *
 */
 extern void resets_clear(u32 mask);
+extern void pad_input_pullup(u32 pin);
+extern void delay_5_us();
+
 static void pump_tx_write_alternating(i2c_bus *bus);
 static void pump_tx_write(i2c_bus *bus);
 static void pump_tx_read(i2c_bus *bus);
 static void drain_rx(i2c_bus *bus);
 static void clear_rx(i2c_bus *bus);
 static void abort_dma(i2c_bus *bus);
+static b32 i2c_bus_recovery(i2c_config *cfg);
 
 static i2c_bus buses[] = {
     [I2C0] = {.hw = i2c0_hw, .last_tar = ~0},
@@ -94,6 +98,11 @@ void i2c_init_master(i2c_config *cfg) {
 
     if (!i2c_is_cfg_valid(cfg)) {
         ERROR("i2c_handle invalid: pins not matching correct bus lane\n");
+        PANIC;
+    }
+
+    if (!i2c_bus_recovery(cfg)) {
+        ERROR("i2c_bus unrecoverable\n");
         PANIC;
     }
 
@@ -502,4 +511,67 @@ static void clear_rx(i2c_bus *bus) {
     while (bus->hw->rxflr) {
         (void)(bus->hw->data_cmd & I2C_IC_DATA_CMD_DAT_BITS);
     }
+}
+
+static b32 i2c_bus_recovery(i2c_config *cfg) { // Recover i2c bus
+    u32 sda_pin = cfg->sda_pin;
+    u32 scl_pin = cfg->sda_pin;
+    u32 sda_mask = 1u << sda_pin;
+    u32 scl_mask = 1u << scl_pin;
+
+    pad_input_pullup(sda_pin);
+    pad_input_pullup(scl_pin);
+    io_bank0_hw->io[sda_pin].ctrl = GPIO_FUNC_SIO;
+    io_bank0_hw->io[scl_pin].ctrl = GPIO_FUNC_SIO;
+    hw_clear_bits(&pads_bank0_hw->io[sda_pin], PADS_BANK0_GPIO0_ISO_BITS);
+    hw_clear_bits(&pads_bank0_hw->io[scl_pin], PADS_BANK0_GPIO0_ISO_BITS);
+
+    sio_hw->gpio_clr = sda_mask | scl_mask;
+    sio_hw->gpio_oe_clr = sda_mask | scl_mask;
+    delay_5_us();
+
+    u32 status = sio_hw->gpio_in;
+    if ((status & sda_mask) && (status & scl_mask)) {
+        return TRUE;
+    }
+    if (!(status & scl_mask)) {
+        return FALSE;
+    }
+
+    b32 sda_free = (sio_hw->gpio_in & sda_mask) != 0;
+
+    for (u32 i = 0; i < 9; i++) {
+        sio_hw->gpio_oe_set = scl_mask; // scl low
+        delay_5_us();
+        sio_hw->gpio_oe_clr = scl_mask; // release (pull up raises it)
+        //
+        u32 timeout = 10000;
+        while (!(sio_hw->gpio_in & scl_mask)) {
+            if (--timeout == 0) {
+                return FALSE;
+            }
+        }
+        delay_5_us();
+
+        sda_free = (sio_hw->gpio_in & sda_mask) != 0;
+    }
+
+    if (!sda_free) {
+        return FALSE;
+    }
+
+    // stop condition: sda low while scl low, raise scl then release sda.
+    sio_hw->gpio_oe_set = scl_mask; // scl low
+    delay_5_us();
+    sio_hw->gpio_oe_set = sda_mask; // sda low
+    delay_5_us();
+    sio_hw->gpio_oe_clr = scl_mask; // scl high
+    delay_5_us();
+    sio_hw->gpio_oe_clr = sda_mask; // sda raises while scl high
+    delay_5_us();
+
+    sio_hw->gpio_oe_clr = sda_mask | scl_mask;
+    io_bank0_hw->io[sda_pin].ctrl = GPIO_FUNC_I2C;
+    io_bank0_hw->io[scl_pin].ctrl = GPIO_FUNC_I2C;
+    return TRUE;
 }

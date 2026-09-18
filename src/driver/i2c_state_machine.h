@@ -8,6 +8,7 @@
 #include <hardware/structs/i2c.h>
 #include <hardware/structs/m33.h>
 #include <hardware/structs/dma.h>
+#include <hardware/structs/sio.h>
 
 #include <hardware/regs/dreq.h>
 #include "addresses.h"

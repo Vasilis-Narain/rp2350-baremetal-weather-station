@@ -79,6 +79,19 @@ void resets_clear(u32 mask) {
     while ((resets_hw->reset_done & mask) != mask) {}
 }
 
+void pad_input_pullup(u32 pin) {
+    pads_bank0_hw->io[pin] = (pads_bank0_hw->io[pin] & ~(PADS_BANK0_GPIO0_OD_BITS | PADS_BANK0_GPIO0_PDE_BITS)) |
+                             PADS_BANK0_GPIO0_IE_BITS |
+                             PADS_BANK0_GPIO0_PUE_BITS;
+}
+
+// temp function to wait ~5us (depends on clk_ref that's why its temp only)
+void delay_5_us() {
+    for (u32 j = 0; j < 20; j++) {
+        __asm__ volatile("nop");
+    }
+}
+
 void main() {
     char writer_buf[RTT_WRITER_MAX_BUFFER_SIZE];
     Writer rtt_writer_instance;
