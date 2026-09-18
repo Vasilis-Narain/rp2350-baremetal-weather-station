@@ -63,6 +63,11 @@
 
 #define OLED_FRAME_BUFFER_SIZE 512
 
+#define OLED_CMD_VAL_COLUMN_START 0x00
+#define OLED_CMD_VAL_COLUMN_END 0x7F
+#define OLED_CMD_VAL_PAGE_START 0x00
+#define OLED_CMD_VAL_PAGE_END 0x03 // 32px = 4 pages
+
 /* Software init flow
 * Set Mux Ratio
 * Set Display Offset
@@ -92,6 +97,12 @@
     OLED_CMD_VAL_SET_CONTRAST_DEFAULT,        \
     OLED_CMD_DISPLAY_RAM,                     \
     OLED_CMD_DISPLAY_NORMAL,                  \
+    OLED_CMD_SET_COLUMN_RANGE,                \
+    OLED_CMD_VAL_COLUMN_START,                \
+    OLED_CMD_VAL_COLUMN_END,                  \
+    OLED_CMD_SET_PAGE_RANGE,                  \
+    OLED_CMD_VAL_PAGE_START,                  \
+    OLED_CMD_VAL_PAGE_END,                    \
     OLED_CMD_SET_MEMORY_ADDR_MODE,            \
     OLED_CMD_VAL_MEMORY_ADDR_MODE_HORZ,       \
     OLED_CMD_SET_DISPLAY_CLK_DIV,             \
@@ -101,4 +112,4 @@
     OLED_CMD_DISPLAY_ON,                      \
 }
 
-#define OLED_DEFAULT_INIT_CMD_LIST_LEN 21
+#define OLED_DEFAULT_INIT_CMD_LIST_LEN 27

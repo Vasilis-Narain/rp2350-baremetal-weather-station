@@ -60,4 +60,4 @@ extern void writer_error(const char *str, u32 length);
         }                                                               \
     } while (0)
 
-#define I2C_DEBUG 1 // 0 for off
+#define I2C_DEBUG 0 // 0 for off

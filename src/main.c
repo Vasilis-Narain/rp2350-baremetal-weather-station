@@ -25,7 +25,7 @@
 #define EXT_CLK_FREQ_HZ 1000000
 #define SYSTICK_TOP (EXT_CLK_FREQ_HZ / SYSTICK_FREQ_HZ - 1)
 
-#define MAIN_PERIOD_MS 500
+#define MAIN_PERIOD_MS 1000
 
 typedef enum {
     APP_IDLE,
@@ -77,7 +77,9 @@ void SYSTICK_Handler() {
     ms++;
     if ((i32)(ms - next) >= 0) {
         next += MAIN_PERIOD_MS;
+#if I2C_DEBUG
         sio_hw->gpio_togl = 1 << PIN25;
+#endif
         if (bme280_is_configged && main_state == APP_IDLE) {
             main_state = APP_START_READ;
         }
