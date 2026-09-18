@@ -204,6 +204,7 @@ void main() {
         switch (main_state) {
         case APP_START_READ: {
             if (bme280_start_read_raw_data(&raw_data) == 0) {
+                oled_clear();
                 //oled_draw_bitmap(0, 0, 128, 32, baby_yoda, TRUE);
                 display_result(oled_writer, &last_data, &default_oled_desc);
                 //oled_draw_text(0, 0, 12, "hello world!", sizeof("hello wolrd!") - 1, FALSE);

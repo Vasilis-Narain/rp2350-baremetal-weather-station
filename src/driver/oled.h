@@ -11,6 +11,7 @@ b32 oled_get_pixel(u32 x, u32 y);
 void oled_draw_text(u32 x, u32 y, FONTS font, char *text, u32 len, b32 inverted);
 void oled_draw_bitmap(u32 x, u32 y, u32 width, u32 height, const u8 *bitmap, b32 inverted);
 void oled_commit_tx_buffer();
+void oled_clear();
 
 // Writing
 b32 oled_init(const u8 *commands, i2c_lane_t bus_lane, u32 dma_channel);

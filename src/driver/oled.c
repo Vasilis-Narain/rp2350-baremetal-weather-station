@@ -22,6 +22,12 @@ void oled_flush(Writer *writer, va_list args) {
     writer->current_size = 0;
 }
 
+void oled_clear() {
+    for (u32 i = 0; i < OLED_FRAME_BUFFER_SIZE; i++) {
+        frame_buffer[i] = 0;
+    }
+}
+
 void oled_commit_tx_buffer() {
     oled_tx_buffer[OLED_FRAME_BUFFER_SIZE] |= I2C_IC_DATA_CMD_STOP_BITS;
 }
