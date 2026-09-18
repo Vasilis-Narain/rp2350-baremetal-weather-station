@@ -13,13 +13,13 @@
 #define IBM_BYTES_PER_GLYPH (IBM_FONT_PAGES * IBM_FONT_WIDTH) // 16
 extern const u8 IBM_VGA_NORMAL_FONT[];
 
-#define LOCHAR 32
-#define HICHAR 126 // inclusive, 95 glyphs - no 127 in this font
-#define FONT_WIDTH 6
-#define FONT_HEIGHT 16 // 2 pages; ink occupies rows 0..12 (descenders)
-#define FONT_PAGES 2
-#define BYTES_PER_GLYPH (FONT_PAGES * FONT_WIDTH) // 12
-#define FONT_ADVANCE_Y 13
+#define TERMINUS_LOCHAR 32
+#define TERMINUS_HICHAR 126 // inclusive, 95 glyphs - no 127 in this font
+#define TERMINUS_FONT_WIDTH 6
+#define TERMINUS_FONT_HEIGHT 16 // 2 pages; ink occupies rows 0..12 (descenders)
+#define TERMINUS_FONT_PAGES 2
+#define TERMINUS_BYTES_PER_GLYPH (TERMINUS_FONT_PAGES * TERMINUS_FONT_WIDTH) // 12
+#define TERMINUS_FONT_ADVANCE_Y 13
 extern const u8 TERMINUS_FONT[];
 
 typedef struct {
@@ -29,6 +29,7 @@ typedef struct {
     u32 bytes_per_glyph;
     u32 advance_y;
     u32 hichar;
+    u32 lochar;
 } font_descriptor;
 extern const font_descriptor TERMINUS_FONT_DESCRIPTOR;
 extern const font_descriptor IBM_VGA_NORMAL_FONT_DESCRIPTOR;

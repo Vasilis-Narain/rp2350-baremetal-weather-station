@@ -5,11 +5,12 @@
 
 const font_descriptor TERMINUS_FONT_DESCRIPTOR = {
     .font = TERMINUS_FONT,
-    .font_width = FONT_WIDTH,
-    .font_height = FONT_HEIGHT,
-    .bytes_per_glyph = BYTES_PER_GLYPH,
-    .advance_y = FONT_ADVANCE_Y,
-    .hichar = HICHAR,
+    .font_width = TERMINUS_FONT_WIDTH,
+    .font_height = TERMINUS_FONT_HEIGHT,
+    .bytes_per_glyph = TERMINUS_BYTES_PER_GLYPH,
+    .advance_y = TERMINUS_FONT_ADVANCE_Y,
+    .hichar = TERMINUS_HICHAR,
+    .lochar = TERMINUS_LOCHAR,
 };
 
 const font_descriptor IBM_VGA_NORMAL_FONT_DESCRIPTOR = {
@@ -19,6 +20,7 @@ const font_descriptor IBM_VGA_NORMAL_FONT_DESCRIPTOR = {
     .bytes_per_glyph = IBM_BYTES_PER_GLYPH,
     .advance_y = IBM_FONT_HEIGHT,
     .hichar = IBM_HICHAR,
+    .lochar = IBM_LOCHAR,
 };
 
 const u8 IBM_VGA_NORMAL_FONT[] = {
@@ -226,6 +228,7 @@ const font_descriptor JMK_FONT_DESCRIPTOR = {
     .bytes_per_glyph = JMK_BYTES_PER_GLYPH,
     .advance_y = JMK_FONT_ADVANCE_Y,
     .hichar = JMK_HICHAR,
+    .lochar = JMK_LOCHAR,
 };
 
 const u8 JMK_FONT[] = {

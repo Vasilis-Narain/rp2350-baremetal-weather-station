@@ -136,7 +136,7 @@ void oled_draw_text(u32 x, u32 y, FONTS font, char *text, u32 len, b32 inverted)
         }
 
         u32 c = (u8)text[i];
-        u32 glyph = (c >= LOCHAR && c <= desc->hichar) ? c - LOCHAR : 0;
+        u32 glyph = (c >= desc->lochar && c <= desc->hichar) ? c - desc->lochar : 0;
         character = desc->font + glyph * desc->bytes_per_glyph;
 
         oled_draw_bitmap(running_x, running_y, desc->font_width, desc->font_height, character, inverted);

@@ -43,7 +43,7 @@ static void display_result(Writer *writer, bme280_final_data *data, oled_write_d
 // statics and globals
 static oled_write_desc default_oled_desc = (oled_write_desc){
     .inverted = FALSE,
-    .font = FONT_TERMINUS,
+    .font = FONT_IBM,
     .x = 0,
     .y = 0,
 };
@@ -294,7 +294,7 @@ static void display_result(Writer *writer, bme280_final_data *data, oled_write_d
     i32 press_int = data->press / 100;
     u32 press_frac = data->press % 100;
     i32 hum_int = data->hum / 1024;
-    u32 hum_frac = (data->hum % 1024);
-    print(writer, "{d}.{d}C {d}.{d}rH\n{d}.{d}hPa", temp_int, temp_frac, hum_int, hum_frac, press_int, press_frac);
+    u32 hum_frac = ((data->hum % 1024) * 1000) / 1024;
+    print(writer, "{d}.{u>2}C {d}.{u>3}rH\n{d}.{u>2}hPa", temp_int, temp_frac, hum_int, hum_frac, press_int, press_frac);
     flush(writer, desc->x, desc->y, desc->font, desc->inverted);
 }

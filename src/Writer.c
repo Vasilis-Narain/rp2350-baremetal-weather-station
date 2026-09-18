@@ -10,14 +10,16 @@ static u32 spread32(u16 num);
 static void copy16(char *out, u16 num);
 static void copy32(char *out, u32 num);
 static u32 to_hex(int_size size, u32 value, char *out);
-static u32 u32_to_string(u32 num, char *buff);
-static u32 i32_to_string(i32 num, char *buff);
+static u32 u32_to_string(u32 num, char *buff, u32 pad_len);
+static u32 i32_to_string(i32 num, char *buff, u32 pad_len);
 static i32 sign_extend(int_size size, i32 num);
 static i32 print_int_hex(Writer *writer, int_size size, u32 num);
-static i32 print_int_dec(Writer *writer, i32 num);
-static i32 print_uint_dec(Writer *writer, u32 num);
+static i32 print_int_dec(Writer *writer, i32 num, u32 pad_len);
+static i32 print_uint_dec(Writer *writer, u32 num, u32 pad_len);
 static char next(const char **fmt, const char *end);
 static u32 unsigned_trunc(int_size size, u32 num);
+
+static const u32 pow_of_10_table[10];
 
 void writer_init(Writer *writer, char *buf, u32 capacity, void (*flush_fn)(Writer *, va_list)) {
     if (!writer || !buf || !capacity || !flush_fn) {
@@ -102,6 +104,7 @@ i32 writer_print(Writer *writer, const char *fmt, u32 length, ...) {
                 fmt_int fmt_type = FMT_DEC;
                 signedness sign;
                 int_size size = WORD;
+                i32 min_len = 0;
                 if (c == 'd') {
                     sign = SIGNED;
                 } else if (c == 'u') {
@@ -111,6 +114,16 @@ i32 writer_print(Writer *writer, const char *fmt, u32 length, ...) {
                 }
 
                 c = next(&fmt, end);
+                if (c == '>') {
+                    c = next(&fmt, end);
+                    if (c >= '0' && c <= '9') {
+                        min_len = c - '0';
+                        c = next(&fmt, end);
+                    } else {
+                        PANIC;
+                    }
+                }
+
                 if (c == ':') {
                     c = next(&fmt, end);
                     if (c == 'x') {
@@ -141,7 +154,7 @@ i32 writer_print(Writer *writer, const char *fmt, u32 length, ...) {
                         if (size != WORD) {
                             num = unsigned_trunc(size, num);
                         }
-                        i32 bytes = print_uint_dec(writer, num);
+                        i32 bytes = print_uint_dec(writer, num, min_len);
                         if (bytes < 0) {
                             PANIC;
                         }
@@ -153,7 +166,7 @@ i32 writer_print(Writer *writer, const char *fmt, u32 length, ...) {
                         if (size != WORD) {
                             num = sign_extend(size, num);
                         }
-                        i32 bytes = print_int_dec(writer, num);
+                        i32 bytes = print_int_dec(writer, num, min_len);
                         if (bytes < 0) {
                             PANIC;
                         }
@@ -219,18 +232,33 @@ static u32 unsigned_trunc(int_size size, u32 num) {
     }
     return x;
 }
+static u32 pad_leading_0(char *buf, u32 len, u32 num) {
+    u32 bytes_printed = 0;
+    if (len == 0) {
+        return 0;
+    }
+    if (num < pow_of_10_table[len]) {
+        u32 tmp_num = (num == 0) ? 10 : num * 10;
+        while (tmp_num < pow_of_10_table[len]) {
+            *buf++ = '0';
+            tmp_num *= 10;
+            bytes_printed++;
+        }
+    }
+    return bytes_printed;
+}
 
-static i32 print_uint_dec(Writer *writer, u32 num) {
+static i32 print_uint_dec(Writer *writer, u32 num, u32 pad_len) {
     char buff[25];
     u32 size = 0;
-    size = u32_to_string(num, buff);
+    size = u32_to_string(num, buff, pad_len);
     return writer_write(writer, (const char *)buff, size);
 }
 
-static i32 print_int_dec(Writer *writer, i32 num) {
+static i32 print_int_dec(Writer *writer, i32 num, u32 pad_len) {
     char buff[25];
     u32 size = 0;
-    size = i32_to_string(num, buff);
+    size = i32_to_string(num, buff, pad_len);
     return writer_write(writer, (const char *)buff, size);
 }
 
@@ -286,7 +314,11 @@ static u32 count_digits_u32(u32 num) {
     return result;
 }
 
-static u32 u32_to_string(u32 num, char *buff) {
+//static u32 pad_leading_0(u8 *buf, u32 len, u32 num);
+static u32 u32_to_string(u32 num, char *buff, u32 pad_len) {
+    u32 padded = (pad_len > 0) ? pad_leading_0(buff, pad_len, num) : 0;
+    buff += padded;
+
     u32 initial_length = count_digits_u32(num);
     u32 length = initial_length;
 
@@ -304,10 +336,10 @@ static u32 u32_to_string(u32 num, char *buff) {
         buff[i] = '0' + num;
     }
 
-    return initial_length;
+    return initial_length + padded;
 }
 
-static u32 i32_to_string(i32 num, char *buff) {
+static u32 i32_to_string(i32 num, char *buff, u32 pad_len) {
     u32 size = 0;
     u32 mag;
 
@@ -318,7 +350,7 @@ static u32 i32_to_string(i32 num, char *buff) {
     } else {
         mag = (u32)num;
     }
-    size += u32_to_string(mag, buff);
+    size += u32_to_string(mag, buff, pad_len);
     return size;
 }
 
