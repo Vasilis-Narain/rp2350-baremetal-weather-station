@@ -11,14 +11,17 @@ static u16 *const frame_buffer = oled_tx_buffer + 1;
 static i2c_lane_t lane;
 static u32 dma_channel;
 
-void oled_flush(Writer *writer, va_list args) {
-    oled_write_desc desc = (oled_write_desc){
-        .x = va_arg(args, u32),
-        .y = va_arg(args, u32),
-        .font = (FONTS)va_arg(args, u32),
-        .inverted = va_arg(args, u32),
-    };
-    oled_draw_text(desc.x, desc.y, desc.font, writer->buf, writer->current_size, desc.inverted);
+static oled_write_desc oled_desc = OLED_DEFAULT_WRITER_DESC;
+
+void oled_set_writer_desc(u32 x, u32 y, FONTS font, b32 inverted) {
+    oled_desc.x = x;
+    oled_desc.y = y;
+    oled_desc.font = font;
+    oled_desc.inverted = inverted;
+}
+
+void oled_flush(Writer *writer) {
+    oled_draw_text(oled_desc.x, oled_desc.y, oled_desc.font, writer->buf, writer->current_size, oled_desc.inverted);
     writer->current_size = 0;
 }
 

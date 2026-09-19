@@ -17,7 +17,7 @@ struct Writer {
 
     // The Writer wipes its buffer after `flush_fn` returns, unconditionally.
     // Loss, retry, and blocking policies are implementation defined.
-    void (*flush_fn)(Writer *, va_list);
+    void (*flush_fn)(Writer *);
 };
 
 typedef enum {
@@ -43,7 +43,7 @@ typedef enum {
 extern void writer_error(const char *str, u32 length);
 #define ERROR(s) writer_error("ERR::" s, sizeof("ERR::" s) - 1)
 
-void writer_init(Writer *writer, char *buf, u32 capacity, void (*flush_fn)(Writer *, va_list));
+void writer_init(Writer *writer, char *buf, u32 capacity, void (*flush_fn)(Writer *));
 #define WRITER_INIT(writer, buf, flush_fn)                                     \
     do {                                                                       \
         _Static_assert(!__builtin_types_compatible_p(__typeof__(buf), char *), \
@@ -52,7 +52,7 @@ void writer_init(Writer *writer, char *buf, u32 capacity, void (*flush_fn)(Write
     } while (0)
 
 // Always remember to flush!
-void flush(Writer *writer, ...);
+void flush(Writer *writer);
 
 i32 writer_write(Writer *writer, const char *str, u32 length);
 void writer_write_char(Writer *writer, char c);

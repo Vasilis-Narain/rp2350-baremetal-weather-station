@@ -24,4 +24,16 @@ typedef struct {
     FONTS font;
     b32 inverted;
 } oled_write_desc;
-void oled_flush(Writer *writer, va_list args);
+
+// Unless you frequently plan to change writing positions
+// its easier to edit this rather than calling `oled_set_writer_desc`
+#define OLED_DEFAULT_WRITER_DESC \
+    (oled_write_desc) {          \
+        .inverted = FALSE,       \
+        .font = FONT_IBM,        \
+        .x = 0,                  \
+        .y = 0,                  \
+    }
+
+void oled_set_writer_desc(u32 x, u32 y, FONTS font, b32 inverted);
+void oled_flush(Writer *writer);

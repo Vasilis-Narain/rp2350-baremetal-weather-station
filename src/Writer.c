@@ -21,7 +21,7 @@ static u32 unsigned_trunc(int_size size, u32 num);
 
 static const u32 pow_of_10_table[10];
 
-void writer_init(Writer *writer, char *buf, u32 capacity, void (*flush_fn)(Writer *, va_list)) {
+void writer_init(Writer *writer, char *buf, u32 capacity, void (*flush_fn)(Writer *)) {
     if (!writer || !buf || !capacity || !flush_fn) {
         PANIC;
     }
@@ -31,15 +31,12 @@ void writer_init(Writer *writer, char *buf, u32 capacity, void (*flush_fn)(Write
     writer->flush_fn = flush_fn;
 }
 
-void flush(Writer *writer, ...) {
+void flush(Writer *writer) {
     if (!writer || !writer->buf || !writer->capacity || !writer->flush_fn) {
         PANIC;
     }
-    va_list args;
-    va_start(args, writer);
-    writer->flush_fn(writer, args);
+    writer->flush_fn(writer);
     writer->current_size = 0;
-    va_end(args);
 }
 
 i32 writer_write(Writer *writer, const char *str, u32 length) {

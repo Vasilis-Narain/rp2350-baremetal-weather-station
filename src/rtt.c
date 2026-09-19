@@ -33,8 +33,7 @@ rtt_ctrl_block_t __attribute__((used, section(".rtt_cb"))) _SEGGER_RTT = {
 
 u32 rtt_bytes_dropped;
 
-void rtt_flush(Writer *writer, va_list args) {
-    (void)args;
+void rtt_flush(Writer *writer) {
     u32 bytes_written = rtt_write((const char *)(writer->buf), writer->current_size, RTT_WRITE_CHANNEL);
     rtt_bytes_dropped += writer->current_size - bytes_written;
 }

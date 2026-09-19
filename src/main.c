@@ -38,15 +38,9 @@ typedef enum {
 static inline void delay_ms(u32 ms_to_wait);
 static void log_fault(Writer *writer, i2c_lane_t lane);
 static void log_result(Writer *writer, bme280_final_data *data);
-static void display_result(Writer *writer, bme280_final_data *data, oled_write_desc *desc);
+static void write_result(Writer *writer, bme280_final_data *data);
 
 // statics and globals
-static oled_write_desc default_oled_desc = (oled_write_desc){
-    .inverted = FALSE,
-    .font = FONT_IBM,
-    .x = 0,
-    .y = 0,
-};
 volatile u32 ms = 0;
 volatile u32 next = 500;
 static volatile bme280_raw_data_t raw_data;
@@ -118,7 +112,7 @@ void main() {
     flush(rtt_writer);
 
     // Always first clear reset bits for desired functionalities.
-    // In this case: iobank, padsbank, i2c
+    // In this case: iobank, padsbank
     resets_clear(RESETS_CLEAR);
 
     //io_bank0_hw -> gpio function selection
@@ -208,7 +202,7 @@ void main() {
             if (bme280_start_read_raw_data(&raw_data) == 0) {
                 oled_clear();
                 //oled_draw_bitmap(0, 0, 128, 32, baby_yoda, TRUE);
-                display_result(oled_writer, &last_data, &default_oled_desc);
+                write_result(oled_writer, &last_data);
                 //oled_draw_text(0, 0, 12, "hello world!", sizeof("hello wolrd!") - 1, FALSE);
                 oled_commit_tx_buffer();
                 main_state = APP_READING;
@@ -230,7 +224,7 @@ void main() {
                 log_fault(rtt_writer, i2c1_cfg.lane);
             }
 
-            if (oled_start_dma_write() == 0) { // here we would start writing the frame
+            if (oled_start_dma_write() == 0) {
                 if (have_raw) {
                     last_data = bme280_compensate_data(&calib_params, &raw_data);
                     have_raw = FALSE;
@@ -290,7 +284,7 @@ static void log_result(Writer *writer, bme280_final_data *data) {
     flush(writer);
 }
 
-static void display_result(Writer *writer, bme280_final_data *data, oled_write_desc *desc) {
+static void write_result(Writer *writer, bme280_final_data *data) {
     i32 temp_int = data->temp / 100;
     u32 temp_frac = (data->temp < 0) ? (u32)((-1 * data->temp) % 100) : (u32)(data->temp % 100);
     i32 press_int = data->press / 100;
@@ -298,5 +292,5 @@ static void display_result(Writer *writer, bme280_final_data *data, oled_write_d
     i32 hum_int = data->hum / 1024;
     u32 hum_frac = ((data->hum % 1024) * 1000) / 1024;
     print(writer, "{d}.{u>2}C {d}.{u>3}rH\n{d}.{u>2}hPa", temp_int, temp_frac, hum_int, hum_frac, press_int, press_frac);
-    flush(writer, desc->x, desc->y, desc->font, desc->inverted);
+    flush(writer);
 }
