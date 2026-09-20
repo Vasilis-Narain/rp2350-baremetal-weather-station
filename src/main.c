@@ -49,6 +49,7 @@ static inline void delay_ms(u32 ms_to_wait);
 static void log_fault(Writer *writer, i2c_lane_t lane);
 static void log_result(Writer *writer, bme280_final_data *data);
 static void write_result(Writer *writer, bme280_final_data *data, u32 channel_select);
+static void configure_systick(u8 cycles);
 
 // statics and globals
 // Systick
@@ -90,7 +91,7 @@ void IO_IRQ_BANK0_Handler() {
 }
 
 /* clk_sys must already be configured. Usually done in `crt0`*/
-void configure_systick(u8 cycles) {
+static void configure_systick(u8 cycles) {
     ticks_hw->ticks[TICK_PROC0].cycles = cycles;
     ticks_hw->ticks[TICK_PROC0].ctrl = TICKS_PROC0_CTRL_ENABLE_BITS;
     while (!(ticks_hw->ticks[TICK_PROC0].ctrl & TICKS_PROC0_CTRL_RUNNING_BITS)) {}
@@ -146,12 +147,13 @@ void main() {
     char writer_buf[RTT_WRITER_MAX_BUFFER_SIZE];
     Writer rtt_writer_instance;
     Writer *rtt_writer = &rtt_writer_instance;
-    char oled_buf[512];
+    WRITER_INIT(rtt_writer, writer_buf, rtt_flush);
+
+    char oled_buf[40];
     Writer oled_writer_instance;
     Writer *oled_writer = &oled_writer_instance;
-
-    WRITER_INIT(rtt_writer, writer_buf, rtt_flush);
     WRITER_INIT(oled_writer, oled_buf, oled_flush);
+
     write_all(rtt_writer, "\nRTT " ANSI_GREEN "OK\n" ANSI_CLEAR);
     flush(rtt_writer);
 
@@ -343,13 +345,13 @@ static void log_result(Writer *writer, bme280_final_data *data) {
 }
 
 static void write_result(Writer *writer, bme280_final_data *data, u32 channel_select) {
-
     i32 temp_int = data->temp / 100;
     u32 temp_frac = (data->temp < 0) ? (u32)((-1 * data->temp) % 100) : (u32)(data->temp % 100);
     i32 press_int = data->press / 100;
     u32 press_frac = data->press % 100;
     i32 hum_int = data->hum / 1024;
     u32 hum_frac = ((data->hum % 1024) * 1000) / 1024;
+
     switch (channel_select) {
     case CH_ALL:
         sio_hw->gpio_set = LED_MASK;
