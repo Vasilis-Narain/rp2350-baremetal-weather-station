@@ -1,20 +1,10 @@
 #include <type_alias.h>
-#include <hardware/address_mapped.h>
 #include <hardware/structs/resets.h>
-#include <hardware/structs/io_bank0.h>
-#include <hardware/structs/pads_bank0.h>
-#include <hardware/structs/sio.h>
-#include <hardware/structs/i2c.h>
-#include <hardware/structs/systick.h>
 #include <hardware/structs/ticks.h>
-#include <hardware/structs/m33.h>
 
 #include "rtt.h"
-#include "driver/i2c_state_machine.h"
 #include "driver/bme280.h"
 #include "driver/oled.h"
-
-//#include "baby_yoda.h"
 
 #define SYST_CYCLES 12
 #define PIN25 25
@@ -43,6 +33,10 @@
 #define CH_HUM 0x2
 #define CH_PRESS 0x3
 
+#define BTN_LOCKOUT_MS 40
+#define BTN_CONFIRM_MS 30
+#define BTN_EDGE_MASK ((1u << BTN_CH_EDGE_LOW) | (1u << BTN_CH_EDGE_HIGH))
+
 typedef enum {
     APP_IDLE,
     APP_START_READ,
@@ -50,31 +44,34 @@ typedef enum {
     APP_WRITING,
 } app_state;
 
-// static funcs
+// local functions
 static inline void delay_ms(u32 ms_to_wait);
 static void log_fault(Writer *writer, i2c_lane_t lane);
 static void log_result(Writer *writer, bme280_final_data *data);
 static void write_result(Writer *writer, bme280_final_data *data, u32 channel_select);
 
 // statics and globals
+// Systick
 volatile u32 ms = 0;
 volatile u32 next = 500;
+
+// bme280
 static volatile bme280_raw_data_t raw_data;
 static bme280_final_data last_data;
 static b32 bme280_is_configged = FALSE;
-static b32 oled_is_configged = FALSE;
 static b32 have_raw = FALSE;
-static volatile app_state main_state = APP_IDLE;
+
+// oled
 static const u8 oled_init_commands[] = OLED_DEFAULT_INIT_CMD_LIST;
-static volatile u32 ch_select = CH_ALL;
-static volatile u32 ch_last = CH_ALL;
+static b32 oled_is_configged = FALSE;
+
+// main app
+static volatile app_state main_state = APP_IDLE;
+static volatile u32 ch_select = CH_TEMP;
+static volatile u32 ch_last = CH_TEMP;
 static volatile u32 last_edge_ms = 0;
 static volatile b32 btn_pending = FALSE;
 static volatile u32 btn_deadline = 0;
-
-#define BTN_LOCKOUT_MS 30
-#define BTN_CONFIRM_MS 20
-#define BTN_EDGE_MASK ((1u << BTN_CH_EDGE_LOW) | (1u << BTN_CH_EDGE_HIGH))
 
 void IO_IRQ_BANK0_Handler() {
     u32 latched = io_bank0_hw->proc0_irq_ctrl.ints[2] & BTN_EDGE_MASK;
@@ -118,7 +115,7 @@ void SYSTICK_Handler() {
     }
     if ((i32)(ms - next) >= 0) {
         next += MAIN_PERIOD_MS;
-#if I2C_DEBUG
+#if MAIN_DEBUG
         sio_hw->gpio_togl = 1 << PIN25;
 #endif
         if (oled_is_configged && main_state == APP_IDLE) {
@@ -147,9 +144,9 @@ void delay_5_us() {
 
 void main() {
     char writer_buf[RTT_WRITER_MAX_BUFFER_SIZE];
-    char oled_buf[512];
     Writer rtt_writer_instance;
     Writer *rtt_writer = &rtt_writer_instance;
+    char oled_buf[512];
     Writer oled_writer_instance;
     Writer *oled_writer = &oled_writer_instance;
 
@@ -192,17 +189,7 @@ void main() {
     io_bank0_hw->proc0_irq_ctrl.inte[2] |= BTN_EDGE_MASK;
 
     m33_hw->nvic_iser[ISER_ARRAY_INDEX(IO_IRQ_BANK0)] |= ISER_ARRAY_BIT(IO_IRQ_BANK0);
-    /*
-    pad_input_pullup(sda_pin);
-    pad_input_pullup(scl_pin);
-    io_bank0_hw->io[sda_pin].ctrl = GPIO_FUNC_SIO;
-    io_bank0_hw->io[scl_pin].ctrl = GPIO_FUNC_SIO;
-    hw_clear_bits(&pads_bank0_hw->io[sda_pin], PADS_BANK0_GPIO0_ISO_BITS);
-    hw_clear_bits(&pads_bank0_hw->io[scl_pin], PADS_BANK0_GPIO0_ISO_BITS);
 
-    sio_hw->gpio_clr = sda_mask | scl_mask;
-    sio_hw->gpio_oe_clr = sda_mask | scl_mask;
-    */
     // I2C master enable
     i2c_init_master(&i2c1_cfg);
     i2c_bus_probe(rtt_writer, i2c1_cfg.lane);
@@ -274,9 +261,7 @@ void main() {
                 main_state = APP_READING;
                 u32 ch = ch_last;
                 oled_clear();
-                //oled_draw_bitmap(0, 0, 128, 32, baby_yoda, TRUE);
                 write_result(oled_writer, &last_data, ch);
-                //oled_draw_text(0, 0, 12, "hello world!", sizeof("hello wolrd!") - 1, FALSE);
                 oled_commit_tx_buffer();
             }
             break;
@@ -348,6 +333,7 @@ static void log_fault(Writer *writer, i2c_lane_t lane) {
     print(writer, "hits={u} stat={u:x} mask={u:x}\n", dbg.isr_hits, dbg.intr_stat, dbg.intr_mask);
     print(writer, "state={u} rxflr={u} txflr={u}\n", dbg.state, dbg.rxflr, dbg.txflr);
 #endif
+
     flush(writer);
 }
 
@@ -371,12 +357,12 @@ static void write_result(Writer *writer, bme280_final_data *data, u32 channel_se
         break;
     case CH_TEMP:
         sio_hw->gpio_clr = LED_MASK;
-        sio_hw->gpio_set = 1u << LED_RED_CH;
+        sio_hw->gpio_set = 1u << LED_YELLOW_CH;
         print(writer, "TEMPERATURE:\n{d}.{u>2}C", temp_int, temp_frac);
         break;
     case CH_HUM:
         sio_hw->gpio_clr = LED_MASK;
-        sio_hw->gpio_set = 1u << LED_YELLOW_CH;
+        sio_hw->gpio_set = 1u << LED_RED_CH;
         print(writer, "HUMIDITY:\n{d}.{u>3}rH", hum_int, hum_frac);
         break;
     case CH_PRESS:

@@ -11,7 +11,11 @@ static u16 *const frame_buffer = oled_tx_buffer + 1;
 static i2c_lane_t lane;
 static u32 dma_channel;
 
+#ifdef MAIN_FONT
 static oled_write_desc oled_desc = OLED_DEFAULT_WRITER_DESC;
+#else
+static oled_write_desc oled_desc = {0};
+#endif
 
 void oled_set_writer_desc(u32 x, u32 y, FONTS font, b32 inverted) {
     oled_desc.x = x;
@@ -124,6 +128,10 @@ void oled_draw_text(u32 x, u32 y, FONTS font, char *text, u32 len, b32 inverted)
     u32 running_x = x;
     u32 running_y = y;
 
+#ifdef MAIN_FONT
+    (void)font;
+    desc = MAIN_FONT_DESCRIPTOR;
+#else
     switch (font) {
     default:
         desc = &IBM_VGA_NORMAL_FONT_DESCRIPTOR;
@@ -138,6 +146,8 @@ void oled_draw_text(u32 x, u32 y, FONTS font, char *text, u32 len, b32 inverted)
         desc = &TERMINUS_DESCRIPTOR;
         break;
     }
+#endif
+
     b32 aligned = ((y & 0x7) == 0) && ((desc->advance_y & 0x7) == 0);
 
     for (u32 i = 0; i < len; i++) {

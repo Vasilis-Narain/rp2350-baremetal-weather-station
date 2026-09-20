@@ -1,6 +1,30 @@
 #include <type_alias.h>
 #include "rtt.h"
 
+#if !RTT_DEBUG
+u32 rtt_write(const char *str, u32 len, u8 channel) {
+    (void)str;
+    (void)len;
+    (void)channel;
+    return 0;
+}
+u32 rtt_read(char *buf, u32 max, u8 channel) {
+    (void)buf;
+    (void)max;
+    (void)channel;
+    return 0;
+}
+
+void rtt_flush(Writer *writer) {
+    (void)writer;
+}
+
+void writer_error(const char *str, u32 len) {
+    (void)str;
+    (void)len;
+}
+
+#else
 char rtt_buffer_up[RTT_BUFFER_SIZE_UP];
 char rtt_buffer_down[RTT_BUFFER_SIZE_DOWN];
 
@@ -95,3 +119,4 @@ u32 rtt_read(char *buf, u32 max, u8 channel) {
     _SEGGER_RTT.aDown[channel].RdOff = rd_idx;
     return num_bytes_processed;
 }
+#endif

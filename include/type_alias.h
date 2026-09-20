@@ -1,6 +1,9 @@
 #pragma once
 #include <stdint.h>
 
+#define MAIN_DEBUG 0
+#define MAIN_FONT 0
+
 #define ANSI_RETURN_CARRIAGE "\x1B[0A\r"
 #define ANSI_RED "\x1b[31m"
 #define ANSI_GREEN "\x1b[32m"
@@ -60,7 +63,13 @@ extern void writer_error(const char *str, u32 length);
         }                                                               \
     } while (0)
 
-#define I2C_DEBUG 0 // 0 for off
+#if MAIN_DEBUG
+#define I2C_DEBUG 1
+#define RTT_DEBUG 1
+#else
+#define I2C_DEBUG 0
+#define RTT_DEBUG 0
+#endif
 
 #define ISER_ARRAY_INDEX(IRQ) (IRQ / 32)
 #define ISER_ARRAY_LSB(IRQ) (IRQ % 32)
