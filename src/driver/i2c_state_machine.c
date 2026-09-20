@@ -167,12 +167,12 @@ void i2c_irq_enable(i2c_lane_t bus_lane) {
     if (bus_lane == I2C0) {
         i2c0_hw->intr_mask = (I2C_IC_INTR_MASK_M_STOP_DET_BITS | I2C_IC_INTR_MASK_M_TX_ABRT_BITS |
                               I2C_IC_INTR_MASK_M_RX_OVER_BITS);
-        m33_hw->nvic_iser[1] = 1u << 4;
+        m33_hw->nvic_iser[ISER_ARRAY_INDEX(I2C0_IRQ)] = ISER_ARRAY_BIT(I2C0_IRQ);
 
     } else if (bus_lane == I2C1) {
         i2c1_hw->intr_mask = (I2C_IC_INTR_MASK_M_STOP_DET_BITS | I2C_IC_INTR_MASK_M_TX_ABRT_BITS |
                               I2C_IC_INTR_MASK_M_RX_OVER_BITS);
-        m33_hw->nvic_iser[1] = 1u << 5;
+        m33_hw->nvic_iser[ISER_ARRAY_INDEX(I2C1_IRQ)] = ISER_ARRAY_BIT(I2C1_IRQ);
     }
 }
 

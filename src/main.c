@@ -27,6 +27,22 @@
 
 #define MAIN_PERIOD_MS 1000
 
+#define BTN_CH 18
+#define LED_GREEN_CH 19
+#define LED_RED_CH 20
+#define LED_YELLOW_CH 21
+#define LED_MASK (1u << LED_GREEN_CH) | (1u << LED_RED_CH) | (1u << LED_YELLOW_CH)
+
+#define BTN_CH_LEVEL_HIGH 9
+#define BTN_CH_LEVEL_LOW 8
+#define BTN_CH_EDGE_HIGH 11
+#define BTN_CH_EDGE_LOW 10
+
+#define CH_ALL 0x0
+#define CH_TEMP 0x1
+#define CH_HUM 0x2
+#define CH_PRESS 0x3
+
 typedef enum {
     APP_IDLE,
     APP_START_READ,
@@ -38,7 +54,7 @@ typedef enum {
 static inline void delay_ms(u32 ms_to_wait);
 static void log_fault(Writer *writer, i2c_lane_t lane);
 static void log_result(Writer *writer, bme280_final_data *data);
-static void write_result(Writer *writer, bme280_final_data *data);
+static void write_result(Writer *writer, bme280_final_data *data, u32 channel_select);
 
 // statics and globals
 volatile u32 ms = 0;
@@ -48,8 +64,29 @@ static bme280_final_data last_data;
 static b32 bme280_is_configged = FALSE;
 static b32 oled_is_configged = FALSE;
 static b32 have_raw = FALSE;
-static app_state main_state = APP_IDLE;
+static volatile app_state main_state = APP_IDLE;
 static const u8 oled_init_commands[] = OLED_DEFAULT_INIT_CMD_LIST;
+static volatile u32 ch_select = CH_ALL;
+static volatile u32 ch_last = CH_ALL;
+static volatile u32 last_edge_ms = 0;
+
+#define BTN_LOCKOUT_MS 30
+#define BTN_EDGE_MASK ((1u << BTN_CH_EDGE_LOW) | (1u << BTN_CH_EDGE_HIGH))
+
+void IO_IRQ_BANK0_Handler() {
+    u32 latched = io_bank0_hw->proc0_irq_ctrl.ints[2] & BTN_EDGE_MASK;
+
+    io_bank0_hw->intr[2] = latched;
+    (void)io_bank0_hw->intr[2];
+
+    u32 now = ms;
+    u32 quiet = (u32)(now - last_edge_ms);
+    last_edge_ms = now;
+
+    if ((latched & (1u << BTN_CH_EDGE_LOW)) && quiet >= BTN_LOCKOUT_MS) {
+        ch_select = (ch_select + 1) & (0x3);
+    }
+}
 
 /* clk_sys must already be configured. Usually done in `crt0`*/
 void configure_systick(u8 cycles) {
@@ -57,24 +94,29 @@ void configure_systick(u8 cycles) {
     ticks_hw->ticks[TICK_PROC0].ctrl = TICKS_PROC0_CTRL_ENABLE_BITS;
     while (!(ticks_hw->ticks[TICK_PROC0].ctrl & TICKS_PROC0_CTRL_RUNNING_BITS)) {}
 
-    // SysTick Control and Status Register
-    // 0x00010000 [16]    COUNTFLAG    (0) Returns 1 if timer counted to 0 since last time this was read
-    // 0x00000004 [2]     CLKSOURCE    (0) SysTick clock source
-    // 0x00000002 [1]     TICKINT      (0) Enables SysTick exception request: +
-    // 0x00000001 [0]     ENABLE       (0) Enable SysTick counter: +
     m33_hw->syst_rvr = SYSTICK_TOP;
     m33_hw->syst_cvr = 0;
     m33_hw->syst_csr = M33_SYST_CSR_TICKINT_BITS | M33_SYST_CSR_ENABLE_BITS;
 }
 
+volatile b32 changed = FALSE;
+
 void SYSTICK_Handler() {
     ms++;
+    if (oled_is_configged && ch_last != ch_select && main_state == APP_IDLE) {
+        ch_last = ch_select;
+        changed = TRUE;
+        main_state = APP_START_READ;
+        return;
+    }
+
     if ((i32)(ms - next) >= 0) {
         next += MAIN_PERIOD_MS;
 #if I2C_DEBUG
         sio_hw->gpio_togl = 1 << PIN25;
 #endif
-        if (bme280_is_configged && main_state == APP_IDLE) {
+        if (oled_is_configged && main_state == APP_IDLE) {
+            changed = FALSE;
             main_state = APP_START_READ;
         }
     }
@@ -117,12 +159,18 @@ void main() {
 
     //io_bank0_hw -> gpio function selection
     io_bank0_hw->io[PIN25].ctrl = GPIO_FUNC_SIO;
+    io_bank0_hw->io[LED_GREEN_CH].ctrl = GPIO_FUNC_SIO;
+    io_bank0_hw->io[LED_RED_CH].ctrl = GPIO_FUNC_SIO;
+    io_bank0_hw->io[LED_YELLOW_CH].ctrl = GPIO_FUNC_SIO;
 
     // Pads bank -> configure pads for led
     hw_clear_bits(&pads_bank0_hw->io[PIN25], PADS_BANK0_GPIO0_ISO_BITS);
+    hw_clear_bits(&pads_bank0_hw->io[LED_GREEN_CH], PADS_BANK0_GPIO0_ISO_BITS);
+    hw_clear_bits(&pads_bank0_hw->io[LED_RED_CH], PADS_BANK0_GPIO0_ISO_BITS);
+    hw_clear_bits(&pads_bank0_hw->io[LED_YELLOW_CH], PADS_BANK0_GPIO0_ISO_BITS);
 
     // output enable SIO reg. Special atomic registers for SIO
-    sio_hw->gpio_oe_set = 1 << PIN25;
+    sio_hw->gpio_oe_set = (1u << PIN25) | LED_MASK;
 
     // clk_sys must be configured before calling this function.
     configure_systick(SYST_CYCLES);
@@ -132,6 +180,24 @@ void main() {
         .scl_pin = GP15,
     };
 
+    // Enable btn irq
+    pad_input_pullup(BTN_CH);
+    io_bank0_hw->io[BTN_CH].ctrl = GPIO_FUNC_SIO;
+    hw_clear_bits(&pads_bank0_hw->io[BTN_CH], (PADS_BANK0_GPIO0_ISO_BITS));
+    io_bank0_hw->proc0_irq_ctrl.inte[2] |= BTN_EDGE_MASK;
+
+    m33_hw->nvic_iser[ISER_ARRAY_INDEX(IO_IRQ_BANK0)] |= ISER_ARRAY_BIT(IO_IRQ_BANK0);
+    /*
+    pad_input_pullup(sda_pin);
+    pad_input_pullup(scl_pin);
+    io_bank0_hw->io[sda_pin].ctrl = GPIO_FUNC_SIO;
+    io_bank0_hw->io[scl_pin].ctrl = GPIO_FUNC_SIO;
+    hw_clear_bits(&pads_bank0_hw->io[sda_pin], PADS_BANK0_GPIO0_ISO_BITS);
+    hw_clear_bits(&pads_bank0_hw->io[scl_pin], PADS_BANK0_GPIO0_ISO_BITS);
+
+    sio_hw->gpio_clr = sda_mask | scl_mask;
+    sio_hw->gpio_oe_clr = sda_mask | scl_mask;
+    */
     // I2C master enable
     i2c_init_master(&i2c1_cfg);
     i2c_bus_probe(rtt_writer, i2c1_cfg.lane);
@@ -200,12 +266,13 @@ void main() {
         switch (main_state) {
         case APP_START_READ: {
             if (bme280_start_read_raw_data(&raw_data) == 0) {
+                main_state = APP_READING;
+                u32 ch = ch_last;
                 oled_clear();
                 //oled_draw_bitmap(0, 0, 128, 32, baby_yoda, TRUE);
-                write_result(oled_writer, &last_data);
+                write_result(oled_writer, &last_data, ch);
                 //oled_draw_text(0, 0, 12, "hello world!", sizeof("hello wolrd!") - 1, FALSE);
                 oled_commit_tx_buffer();
-                main_state = APP_READING;
             }
             break;
         }
@@ -284,13 +351,36 @@ static void log_result(Writer *writer, bme280_final_data *data) {
     flush(writer);
 }
 
-static void write_result(Writer *writer, bme280_final_data *data) {
+static void write_result(Writer *writer, bme280_final_data *data, u32 channel_select) {
+
     i32 temp_int = data->temp / 100;
     u32 temp_frac = (data->temp < 0) ? (u32)((-1 * data->temp) % 100) : (u32)(data->temp % 100);
     i32 press_int = data->press / 100;
     u32 press_frac = data->press % 100;
     i32 hum_int = data->hum / 1024;
     u32 hum_frac = ((data->hum % 1024) * 1000) / 1024;
-    print(writer, "{d}.{u>2}C {d}.{u>3}rH\n{d}.{u>2}hPa", temp_int, temp_frac, hum_int, hum_frac, press_int, press_frac);
+    switch (channel_select) {
+    case CH_ALL:
+        sio_hw->gpio_set = LED_MASK;
+        print(writer, "{d}.{u>2}C {d}.{u>3}rH\n{d}.{u>2}hPa", temp_int, temp_frac, hum_int, hum_frac, press_int, press_frac);
+        break;
+    case CH_TEMP:
+        sio_hw->gpio_clr = LED_MASK;
+        sio_hw->gpio_set = 1u << LED_RED_CH;
+        print(writer, "TEMPERATURE:\n   {d}.{u>2}C", temp_int, temp_frac);
+        break;
+    case CH_HUM:
+        sio_hw->gpio_clr = LED_MASK;
+        sio_hw->gpio_set = 1u << LED_YELLOW_CH;
+        print(writer, "HUMIDITY:\n   {d}.{u>3}rH", hum_int, hum_frac);
+        break;
+    case CH_PRESS:
+        sio_hw->gpio_clr = LED_MASK;
+        sio_hw->gpio_set = 1u << LED_GREEN_CH;
+        print(writer, "PRESSURE:\n {d}.{u>2}hPa", press_int, press_frac);
+        break;
+    default:
+        break;
+    }
     flush(writer);
 }

@@ -61,3 +61,7 @@ extern void writer_error(const char *str, u32 length);
     } while (0)
 
 #define I2C_DEBUG 0 // 0 for off
+
+#define ISER_ARRAY_INDEX(IRQ) (IRQ / 32)
+#define ISER_ARRAY_LSB(IRQ) (IRQ % 32)
+#define ISER_ARRAY_BIT(IRQ) (1u << ISER_ARRAY_LSB(IRQ))
