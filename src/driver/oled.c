@@ -99,6 +99,24 @@ void oled_draw_bitmap(u32 x, u32 y, u32 width, u32 height, const u8 *bitmap, b32
     }
 }
 
+static void oled_blit_glyph_page_aligned(u32 x, u32 y, const font_descriptor *desc, const u8 *bitmap, b32 inverted) {
+    u32 page = y >> 3;
+    u32 width = desc->font_width;
+    for (u32 page_index = 0; page_index < desc->pages_per_glyph; page_index++) {
+        if ((page + page_index) >= (OLED_HEIGHT >> 3)) {
+            return;
+        }
+        u32 row = (page + page_index) * OLED_WIDTH;
+        for (u32 bx = 0; bx < width; bx++) {
+            if (x + bx >= OLED_WIDTH) {
+                break;
+            }
+            u8 col = bitmap[page_index * width + bx];
+            frame_buffer[row + x + bx] = inverted ? (u8)~col : col;
+        }
+    }
+}
+
 void oled_draw_text(u32 x, u32 y, FONTS font, char *text, u32 len, b32 inverted) {
     const font_descriptor *desc;
     const u8 *character;
@@ -108,18 +126,19 @@ void oled_draw_text(u32 x, u32 y, FONTS font, char *text, u32 len, b32 inverted)
 
     switch (font) {
     default:
-        desc = &TERMINUS_FONT_DESCRIPTOR;
-        break;
-    case FONT_TERMINUS:
-        desc = &TERMINUS_FONT_DESCRIPTOR;
+        desc = &IBM_VGA_NORMAL_FONT_DESCRIPTOR;
         break;
     case FONT_IBM:
         desc = &IBM_VGA_NORMAL_FONT_DESCRIPTOR;
         break;
     case FONT_JMK:
-        desc = &JMK_FONT_DESCRIPTOR;
+        desc = &JMK_DESCRIPTOR;
+        break;
+    case FONT_TERMINUS:
+        desc = &TERMINUS_DESCRIPTOR;
         break;
     }
+    b32 aligned = ((y & 0x7) == 0) && ((desc->advance_y & 0x7) == 0);
 
     for (u32 i = 0; i < len; i++) {
 
@@ -141,8 +160,11 @@ void oled_draw_text(u32 x, u32 y, FONTS font, char *text, u32 len, b32 inverted)
         u32 c = (u8)text[i];
         u32 glyph = (c >= desc->lochar && c <= desc->hichar) ? c - desc->lochar : 0;
         character = desc->font + glyph * desc->bytes_per_glyph;
-
-        oled_draw_bitmap(running_x, running_y, desc->font_width, desc->font_height, character, inverted);
+        if (aligned) {
+            oled_blit_glyph_page_aligned(running_x, running_y, desc, character, inverted);
+        } else {
+            oled_draw_bitmap(running_x, running_y, desc->font_width, desc->font_height, character, inverted);
+        }
 
         running_x += desc->font_width;
     }

@@ -372,17 +372,17 @@ static void write_result(Writer *writer, bme280_final_data *data, u32 channel_se
     case CH_TEMP:
         sio_hw->gpio_clr = LED_MASK;
         sio_hw->gpio_set = 1u << LED_RED_CH;
-        print(writer, "TEMPERATURE:\n   {d}.{u>2}C", temp_int, temp_frac);
+        print(writer, "TEMPERATURE:\n{d}.{u>2}C", temp_int, temp_frac);
         break;
     case CH_HUM:
         sio_hw->gpio_clr = LED_MASK;
         sio_hw->gpio_set = 1u << LED_YELLOW_CH;
-        print(writer, "HUMIDITY:\n   {d}.{u>3}rH", hum_int, hum_frac);
+        print(writer, "HUMIDITY:\n{d}.{u>3}rH", hum_int, hum_frac);
         break;
     case CH_PRESS:
         sio_hw->gpio_clr = LED_MASK;
         sio_hw->gpio_set = 1u << LED_GREEN_CH;
-        print(writer, "PRESSURE:\n {d}.{u>2}hPa", press_int, press_frac);
+        print(writer, "PRESSURE:\n{d}.{u>2}hPa", press_int, press_frac);
         break;
     default:
         break;
