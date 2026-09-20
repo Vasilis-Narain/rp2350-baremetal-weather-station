@@ -1,11 +1,11 @@
 # Bare-Metal Weather Station Firmware (RP2350)
 
-Bare-metal C firmware for the Pico 2. A Bosch BME280 sensor and an SSD1306 OLED share one I2C bus, driven by an
-interrupt-driven state machine I wrote against the datasheets. No SDK runtime, no HAL, no libc -- only the generated
-`register` and `struct` headers from the `pico-sdk`.
+Uses `register` and `struct` headers from the `pico-sdk`.
+Doesn't link against libc.
 
-Readings are taken every 500ms, compensated, rendered into a framebuffer and pushed to the display over DMA.
-Both devices sit on I2C1 (GP14/GP15); the driver serialises their transfers, since sharing a bus is the point of I2C.
+Readings are taken every second, compensated, and the framebuffer holding them is pushed to the display over DMA.
+Both devices sit on I2C1 (GP14/GP15); the driver serialises their transfers.
+A button cycles the display between pages signalled with different LED's.
 
 ## Hardware
 
@@ -13,40 +13,85 @@ Both devices sit on I2C1 (GP14/GP15); the driver serialises their transfers, sin
 - Pico Debug Probe over SWD
 - BME280 breakout (Pimoroni)
 - SSD1306 128x32 OLED
+- 4-pin tactile button on GP18
+- Indicator LEDs on GP19 (green), GP20 (red), GP21 (yellow)
+
+Button network:
+
+- 10k from 3V3 to node A
+- button from node A to ground
+- 5k from node A to GP18 (two 10k in parallel -- see the E9 note below)
+- 100nF from GP18 to ground
 
 ## Build
 
-```sh
-make           # build/firmware.uf2
-make flash     # probe-rs download + reset
-make run       # flash and stream RTT
-```
+- `make` -- builds `build/firmware.uf2`
+- `make flash` -- `probe-rs download` + reset
+- `make run` -- flash and stream RTT
+- `make attach` -- stream RTT from an already-running target, no flash, no reset
+- `make uf2 DRIVE=/d` -- copy the image to a mounted BOOTSEL volume, no probe needed
 
-Point `SDK` at the `src` directory of a `pico-sdk` checkout: `make SDK=/path/to/pico-sdk/src`
+Notes:
 
-`make flash` and `make run` require [`probe-rs`](https://probe.rs/) on PATH and a connected debug probe.
-`make uf2 DRIVE=/d` copies the image to a BOOTSEL volume instead, no probe needed.
+- point `SDK` at the `src` directory of a `pico-sdk` checkout: `make SDK=/path/to/pico-sdk/src`
+- `flash`, `run` and `attach` need [`probe-rs`](https://probe.rs/) on PATH and a connected debug probe
 
 ## Components
 
-**Startup** (`entry.c`, `_crt0.c`, `link.ld`) -- vector table, all 52 IRQs weak-aliased to a handler that resets the peripherals and halts.
-Clock is set to use the crystal oscillator for greater accuracy (`XOSC`) and then the `FPU` is enabled. Then `.data` is copied into RAM and `.bss` is zeroed.
-Also includes the necessary boot block expected by the RP2350 (magic numbers pulled from the datasheet).
+#### **Startup** (`entry.c`, `_crt0.c`, `link.ld`)
+- `entry.c` defines the vector table with irq and default handlers.
+  - also defines the boot block expected by the RP2350 *([datasheet section 5.9.5](https://pip-assets.raspberrypi.com/categories/1214-rp2350/documents/RP-008373-DS-2-rp2350-datasheet.pdf/#page=429))*.
+- `_crt0.c` sets the clock to the crystal oscillator, enables the fpu, copies `.data` over and zeroes `.bss`.
 
-**I2C** (`driver/i2c_state_machine.c`) -- ISR state machine with per-bus context, so both controllers share the same ISR logic (both tested on hardware).
-Three transfer paths: bulk read, sequential/alternating CPU writes, and a DMA write that feeds the TX FIFO directly. Transfers are started
-asynchronously and the caller polls `i2c_poll_state()`, so the main loop never blocks on the bus. Bus recovery at init clocks out a stuck
-slave before the controller is enabled. Faults are explicit (`I2C_FAULT_ABORT`, `_OVERRUN`, `_STORM`, `_EARLY_STOP`) and the abort source
-register is captured for diagnosis; an ISR storm guard masks interrupts and faults the transfer after 10,000 interrupts in one transfer.
-Includes an address probe used to scan the bus at startup. With `I2C_DEBUG` set to 1 (in `type_alias.h`) it snapshots the interrupt/FIFO
-registers for printing over RTT.
+#### **I2C** (`driver/i2c_state_machine.c`)
+- ISR state machine with per-bus context
+- Three transfer paths: bulk read, sequential/alternating CPU writes, and a DMA write
+- Transfers are started asynchronously and the caller polls `i2c_poll_state()` 
+- I2C bus recovery sequence on reset
+- Tested on a usb logic analyser: `signals/`.
 
-**Bus sharing** -- SysTick sets a flag every 500ms; the main loop runs a small state machine that issues the BME280 read, waits for it,
-then hands the bus to the OLED frame write and waits for that. One owner at a time, no locks, no allocation.
+#### **Bus sharing**
+
+The current app functions through a state machine:
+
+```C
+typedef enum {
+    APP_IDLE,
+    APP_START_READ,
+    APP_READING,
+    APP_WRITING,
+} app_state;
+```
+
+
+SysTick sets the state, the main loop runs it, and both CPU-heavy steps are placed so they overlap a transfer instead of
+stalling behind one. `APP_START_READ` issues the BME280 read and then, while that read is still on the wire, clears the framebuffer and
+rasterizes the current page into it. `APP_READING` waits for the read to land, starts the OLED DMA, and only then runs the fixed-point
+compensation, so that math overlaps the ~46ms frame write rather than delaying it. `APP_WRITING` waits for the frame out and drops back to
+idle. Refresh is every second, or immediately when the page changes. One owner of the bus at a time, no locks, no allocation.
+
+Ordering it that way has one consequence worth remembering: the frame drawn in a given cycle renders `last_data`, which is the previous
+cycle's compensated values. The display trails the sensor by one refresh. A page switch shows the new label straight away, since the page
+index is read at rasterize time, but the numbers under it are one cycle old.
+
+**Page selection** (`main.c`) -- the button cycles through four pages and the matching LED says which one is showing. Both edges are enabled
+on GP18. The handler timestamps every edge and ignores a falling edge arriving within 30ms of any other edge, which kills the bounce burst
+on the press and on the release -- the release matters, because a bouncing release emits falling edges too, and they land long after any
+lockout keyed to the press itself. A falling edge that survives that only arms a 20ms timer; SysTick re-reads the pin when it expires and
+advances the page only if the line is still low. A bounce blip or a noise glitch cannot hold the line down for 20ms, so neither counts.
+The confirm runs on the same SysTick tick that latches the page change, so the display picks it up on the next idle pass instead of waiting
+for the one-second refresh.
+
+**RP2350-E9** -- worth knowing about if you wire a button to this chip. With the input buffer enabled and the pad sitting between logic
+levels, the pad leaks up to 120uA, and the erratum asks for 8.2k or less between the pin and whatever is pulling it low. My first attempt
+used 10k there, and with the button held the pin measured 1.53V: never a valid low, so presses did nothing, and every bit of noise during
+a display update chattered the edge detector instead. Dropping that resistor to 5k puts the held level around 0.6V and it behaves. The
+pull-up side is unaffected, so the 10k from 3V3 stays as it is.
 
 **OLED** (`driver/oled.c`) -- SSD1306 driver over the same bus. 512-byte page-major framebuffer with pixel, bitmap and text rasterizers.
 The frame is stored as `u16` entries so the final I2C `STOP` bit can be encoded in the last word, which lets DMA push the whole frame
-into `IC_DATA_CMD` without a completion IRQ or a polling loop to append the stop.
+into `IC_DATA_CMD` without a completion IRQ or a polling loop to append the stop. Text position, font and inversion live in a single
+module-level descriptor set by `oled_set_writer_desc()`, so `oled_flush` matches the plain `Writer` flush signature instead of carrying varargs.
 
 **Fonts** (`fonts.c`, `tools/font_convert.py`) -- three bitmap fonts stored in the SSD1306 page-major layout so glyph blitting is a
 straight copy. The Python tool converts row-major font dumps into that layout, previews the glyphs as ASCII, and patches the generated
@@ -64,5 +109,4 @@ over SWD with the Pico Debug Probe. Also gave the SEGGER block dedicated memory 
 
 ## TODO
 
-- verify the bus with a logic analyser.
 - calculate the SCL high/low counts at compile time instead of hardcoding for 12MHz `clk_sys`.
