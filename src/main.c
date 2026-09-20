@@ -69,8 +69,11 @@ static const u8 oled_init_commands[] = OLED_DEFAULT_INIT_CMD_LIST;
 static volatile u32 ch_select = CH_ALL;
 static volatile u32 ch_last = CH_ALL;
 static volatile u32 last_edge_ms = 0;
+static volatile b32 btn_pending = FALSE;
+static volatile u32 btn_deadline = 0;
 
 #define BTN_LOCKOUT_MS 30
+#define BTN_CONFIRM_MS 20
 #define BTN_EDGE_MASK ((1u << BTN_CH_EDGE_LOW) | (1u << BTN_CH_EDGE_HIGH))
 
 void IO_IRQ_BANK0_Handler() {
@@ -83,8 +86,9 @@ void IO_IRQ_BANK0_Handler() {
     u32 quiet = (u32)(now - last_edge_ms);
     last_edge_ms = now;
 
-    if ((latched & (1u << BTN_CH_EDGE_LOW)) && quiet >= BTN_LOCKOUT_MS) {
-        ch_select = (ch_select + 1) & (0x3);
+    if ((latched & (1u << BTN_CH_EDGE_LOW)) && !btn_pending && quiet >= BTN_LOCKOUT_MS) {
+        btn_pending = TRUE;
+        btn_deadline = now + BTN_CONFIRM_MS;
     }
 }
 
@@ -99,24 +103,25 @@ void configure_systick(u8 cycles) {
     m33_hw->syst_csr = M33_SYST_CSR_TICKINT_BITS | M33_SYST_CSR_ENABLE_BITS;
 }
 
-volatile b32 changed = FALSE;
-
 void SYSTICK_Handler() {
     ms++;
+    if (btn_pending && (i32)(ms - btn_deadline) >= 0) {
+        btn_pending = FALSE;
+        if (((sio_hw->gpio_in >> BTN_CH) & 1u) == 0) {
+            ch_select = (ch_select + 1) & 0x3;
+        }
+    }
     if (oled_is_configged && ch_last != ch_select && main_state == APP_IDLE) {
         ch_last = ch_select;
-        changed = TRUE;
         main_state = APP_START_READ;
         return;
     }
-
     if ((i32)(ms - next) >= 0) {
         next += MAIN_PERIOD_MS;
 #if I2C_DEBUG
         sio_hw->gpio_togl = 1 << PIN25;
 #endif
         if (oled_is_configged && main_state == APP_IDLE) {
-            changed = FALSE;
             main_state = APP_START_READ;
         }
     }
