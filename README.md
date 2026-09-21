@@ -61,8 +61,7 @@ flowchart TB
         I["APP_IDLE<br/>WFI"]
         S["APP_START_READ<br/>issue BME280 read"] --> R["rasterize frame"]
         R --> RD["APP_READING<br/>await read"]
-        RD --> DMA["start OLED DMA"]
-        DMA --> OK{"read OK?"}
+        RD --> OK{"read OK?"}
         OK -- yes --> C["compensate raw data"]
         OK -- no --> LF["log_fault"]
         C --> W["APP_WRITING<br/>await STOP, log_fault on error<br/>then back to APP_IDLE"]
@@ -80,10 +79,9 @@ flowchart TB
     BTN -.-> SYS
     SYS -.-> S
     S -.-> ISR
-    ISR -.-> RD
-    DMA -.-> DF
     DF -.-> W
     W -.->I
+OK -.-> DF
 ```
 
 Note: In order to keep the CPU busy while waiting for the I2C transfers I opted for always rendering the last sample
