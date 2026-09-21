@@ -85,7 +85,7 @@ if () then
     :dropped as a glitch;
     stop
   endif
-  detach
+  stop
 else ()
   |Main loop|
   repeat
