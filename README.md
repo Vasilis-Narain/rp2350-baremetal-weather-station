@@ -76,13 +76,14 @@ flowchart TB
     end
 
     I -.-> SYS
+    SYS -.-> I
     BTN -.-> SYS
     SYS -.-> S
     S -.-> ISR
     DF -.-> W
     W -.->I
-ISR -.->OK
-OK -.-> DF
+    ISR -.->OK
+    OK -.-> DF
 ```
 
 Note: In order to keep the CPU busy while waiting for the I2C transfers I opted for always rendering the last sample
