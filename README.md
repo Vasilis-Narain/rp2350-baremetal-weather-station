@@ -58,7 +58,7 @@ The current app functions through a state machine:
 %%{init: {"themeVariables": {"fontSize": "12px"}, "flowchart": {"defaultRenderer":"elk", "nodeSpacing": 40, "rankSpacing": 22, "padding": 6, "diagramPadding": 10, "curve": "linear", "subGraphTitleMargin": {"top": 4, "bottom": 20}}}}%%
 flowchart TB
     subgraph MAIN["Main loop"]
-        I["APP_IDLE<br/>WFI"]
+        I["APP_IDLE"]
         S["APP_START_READ<br/>issue BME280 read"] --> R["rasterize frame"]
         R --> RD["APP_READING<br/>wait for STOP"]
         RD --> OK{"read OK?"}
@@ -75,7 +75,7 @@ flowchart TB
         DF["DMA feeds IC_DATA_CMD<br/>STOP sets bus DONE"]
     end
 
-    I -.-> SYS
+    I <-.WFI.-> SYS
     SYS -.-> I
     BTN -.-> SYS
     SYS -.-> S
