@@ -3,8 +3,8 @@
 Uses `register` and `struct` headers from the `pico-sdk`.
 Doesn't link against libc.
 
-Readings are taken every second, compensated, and the framebuffer holding them is pushed to the display over DMA.
-Both devices sit on I2C1 (GP14/GP15); the driver serialises their transfers.
+Readings are taken and rendered every second but supports faster speeds by reducing  `MAIN_PERIOD_MS`.
+Both devices sit on I2C1 (GP14/GP15), the driver serialises their transfers through a state machine.
 A button cycles the display between pages signalled with different LED's.
 
 ## Hardware
@@ -54,13 +54,79 @@ Notes:
 
 The current app functions through a state machine:
 
-```C
-typedef enum {
-    APP_IDLE,
-    APP_START_READ,
-    APP_READING,
-    APP_WRITING,
-} app_state;
+```plantuml
+@startuml
+skinparam shadowing false
+skinparam ArrowColor #444
+skinparam ActivityBackgroundColor White
+skinparam ActivityBorderColor #666
+skinparam ActivityDiamondBackgroundColor White
+skinparam ActivityDiamondBorderColor #666
+
+|#FDF2DC|Button IRQs|
+|#E8F1FB|Main loop|
+|#EAF5EA|Bus IRQs|
+
+|Main loop|
+start
+if () then
+  |Button IRQs|
+  :GPIO falling edge on GP18;
+  if (quiet >= 30 ms\nand no confirm pending?) then (yes)
+    :arm 20 ms confirm;
+  else (no)
+    :ignored as bounce;
+    stop
+  endif
+  :SysTick, 20 ms later;
+  if (GP18 still low?) then (yes)
+    :ch_select++;
+  else (no)
+    :dropped as a glitch;
+    stop
+  endif
+  detach
+else ()
+  |Main loop|
+  repeat
+    :APP_START_READ
+    issue BME280 read;
+    if () then
+      :rasterize frame;
+    else ()
+      |Bus IRQs|
+      :I2C ISR pumps TX, drains RX.
+      A STOP sets bus DONE or ERROR;
+    endif
+    |Main loop|
+    :APP_READING;
+    if (read status?) then (DONE)
+      :have_raw = TRUE;
+    else (ERROR)
+      :log_fault;
+    endif
+    :start OLED DMA;
+    if () then
+      if (have_raw?) then (yes)
+        :compensate raw data;
+      endif
+    else ()
+      |Bus IRQs|
+      :DMA feeds IC_DATA_CMD
+      STOP sets bus DONE;
+    endif
+    |Main loop|
+    :APP_WRITING;
+    if (frame sent OK?) then (no)
+      :log_fault;
+    endif
+    :APP_IDLE, WFI;
+  backward :SysTick IRQ
+  ch_last != ch_select, or 1 s elapsed
+  main_state = APP_START_READ;
+  repeat while ()
+endif
+@enduml
 ```
 
 
