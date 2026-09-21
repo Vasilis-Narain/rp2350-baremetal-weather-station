@@ -15,6 +15,7 @@
 #define EXT_CLK_FREQ_HZ 1000000
 #define SYSTICK_TOP (EXT_CLK_FREQ_HZ / SYSTICK_FREQ_HZ - 1)
 
+// Hardware gated by i2c bus to a minimum of roughly 52+-1ms
 #define MAIN_PERIOD_MS 1000
 
 #define BTN_CH 18
@@ -110,8 +111,8 @@ void SYSTICK_Handler() {
         }
     }
     if (oled_is_configged && ch_last != ch_select && main_state == APP_IDLE) {
-        ch_last = ch_select;
         main_state = APP_START_READ;
+        ch_last = ch_select;
         return;
     }
     if ((i32)(ms - next) >= 0) {
@@ -185,7 +186,13 @@ void main() {
     };
 
     // Enable btn irq
-    pad_input_pullup(BTN_CH);
+    //pad_input_pullup(BTN_CH);
+    pads_bank0_hw->io[BTN_CH] = (pads_bank0_hw->io[BTN_CH] &
+                                    ~(PADS_BANK0_GPIO0_OD_BITS |
+                                        PADS_BANK0_GPIO0_PDE_BITS |
+                                        PADS_BANK0_GPIO0_PUE_BITS)) |
+                                PADS_BANK0_GPIO0_IE_BITS;
+
     io_bank0_hw->io[BTN_CH].ctrl = GPIO_FUNC_SIO;
     hw_clear_bits(&pads_bank0_hw->io[BTN_CH], (PADS_BANK0_GPIO0_ISO_BITS));
     io_bank0_hw->proc0_irq_ctrl.inte[2] |= BTN_EDGE_MASK;
