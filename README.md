@@ -98,10 +98,10 @@ on GP18. The irq handler timestamps every edge and ignores a falling edge arrivi
 (the design also features a double resistor hardware debounce circuit). 
 Button flag changes are polled by SysTick every 1ms and applied as soon as the bus is idle.
 
-**RP2350-E9** -- Button debouncing issues.. With the input buffer enabled and the pad sitting between logic
-levels, the pad leaks up to 120uA, and the erratum asks for 8.2k or less between the pin and whatever is pulling it low. My first attempt
-used 10k there, and with the button held the pin measured 1.53V,so presses did nothing. Every bit of noise during
-a display update chattered the edge detector instead. Dropping that resistor to 5k puts the held level around 0.6V and it behaves. The
+**RP2350-E9** -- Button debouncing issues.. [With the input buffer enabled and the pad sitting between logic
+levels, the pad leaks up to 120uA.](https://hackaday.com/2024/09/20/raspberry-pi-rp2350-e9-erratum-redefined-as-input-mode-leakage-current/) The erratum recommends external pull-downs of 8.2k or less (GPIO is pulled low 
+by R2 on switch press). My first attempt used 10k there, and with the button held the pin measured 1.53V, so presses did nothing. Noise during
+a display update chattered the edge detector instead. Dropping R2 to 5k puts the held level around 0.6V and it behaves. The
 pull-up side is unaffected, so the 10k from 3V3 stays as it is.
 
 **OLED** (`driver/oled.c`) -- SSD1306 driver over the same I2C bus. 512-byte page-major framebuffer with pixel, bitmap and text rasterizers.
@@ -120,4 +120,5 @@ The same interface backs both sinks: one instance flushes to RTT, another raster
 
 ## TODO
 
+- KiCad schematic
 - Use forced mode rather than normal mode for the BME280 sensor
