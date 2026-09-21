@@ -60,7 +60,7 @@ flowchart TB
     subgraph MAIN["Main loop"]
         I["APP_IDLE<br/>WFI"]
         S["APP_START_READ<br/>issue BME280 read"] --> R["rasterize frame"]
-        R --> RD["APP_READING<br/>await read"]
+        R --> RD["APP_READING<br/>wait for STOP"]
         RD --> OK{"read OK?"}
         OK -- yes --> C["compensate raw data"]
         OK -- no --> LF["log_fault"]
@@ -81,6 +81,7 @@ flowchart TB
     S -.-> ISR
     DF -.-> W
     W -.->I
+ISR -.->OK
 OK -.-> DF
 ```
 
