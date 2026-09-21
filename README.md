@@ -55,7 +55,7 @@ Notes:
 The current app functions through a state machine:
 
 ```mermaid
-%%{init: {"themeVariables": {"fontSize": "12px"}, "flowchart": {"nodeSpacing": 40, "rankSpacing": 22, "padding": 6, "diagramPadding": 10, "curve": "linear", "subGraphTitleMargin": {"top": 4, "bottom": 40}}}}%%
+%%{init: {"themeVariables": {"fontSize": "12px"}, "flowchart": {"nodeSpacing": 40, "rankSpacing": 22, "padding": 6, "diagramPadding": 10, "curve": "linear", "subGraphTitleMargin": {"top": 4, "bottom": 20}}}}%%
 flowchart TB
     subgraph MAIN["Main loop"]
         I["APP_IDLE<br/>WFI"]
@@ -76,7 +76,7 @@ flowchart TB
         DF["DMA feeds IC_DATA_CMD<br/>STOP sets bus DONE"]
     end
 
-    I -.-> S
+    I -.-> SYS
     BTN -.-> SYS
     SYS -.-> S
     S -.-> ISR
