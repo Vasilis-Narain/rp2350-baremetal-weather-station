@@ -6,6 +6,8 @@
 #include "driver/bme280.h"
 #include "driver/oled.h"
 
+#include "../logo/orsuka_industries_logo.h"
+
 #define SYST_CYCLES 12
 #define PIN25 25
 
@@ -29,7 +31,7 @@
 #define BTN_CH_EDGE_HIGH 11
 #define BTN_CH_EDGE_LOW 10
 
-#define CH_ALL 0x0
+#define CH_LOGO 0x0
 #define CH_TEMP 0x1
 #define CH_HUM 0x2
 #define CH_PRESS 0x3
@@ -69,8 +71,8 @@ static b32 oled_is_configged = FALSE;
 
 // main app
 static volatile app_state main_state = APP_IDLE;
-static volatile u32 ch_select = CH_TEMP;
-static volatile u32 ch_last = CH_TEMP;
+static volatile u32 ch_select = CH_LOGO;
+static volatile u32 ch_last = CH_LOGO;
 static volatile u32 last_edge_ms = 0;
 static volatile b32 btn_pending = FALSE;
 static volatile u32 btn_deadline = 0;
@@ -360,9 +362,10 @@ static void write_result(Writer *writer, bme280_final_data *data, u32 channel_se
     u32 hum_frac = ((data->hum % 1024) * 1000) / 1024;
 
     switch (channel_select) {
-    case CH_ALL:
+    case CH_LOGO:
         sio_hw->gpio_set = LED_MASK;
-        print(writer, "{d}.{u>2}C {d}.{u>3}rH\n{d}.{u>2}hPa", temp_int, temp_frac, hum_int, hum_frac, press_int, press_frac);
+        //print(writer, "{d}.{u>2}C {d}.{u>3}rH\n{d}.{u>2}hPa", temp_int, temp_frac, hum_int, hum_frac, press_int, press_frac);
+        oled_draw_bitmap(0, 0, 128, 32, orsuka_industries_logo, FALSE);
         break;
     case CH_TEMP:
         sio_hw->gpio_clr = LED_MASK;
