@@ -1,11 +1,14 @@
 # Bare-Metal Weather Station Firmware (RP2350)
 
-Uses `register` and `struct` headers from the `pico-sdk`.
-Doesn't link against libc.
+Firmware for a Pico 2 that reads a BME280 (temperature, pressure, humidity) and shows it on an SSD1306 OLED.
+A button cycles between display pages, with an LED showing which page is active.
 
-Readings are taken and rendered every second but supports faster speeds by reducing  `MAIN_PERIOD_MS`.
-Both devices sit on I2C1 (GP14/GP15), the driver serialises their transfers through a state machine.
-A button cycles the display between pages signalled with different LED's.
+- Written in C with no SDK, HAL or libc. Only the register and struct headers from `pico-sdk` are used.
+- 10.6 KB flash, no heap.
+- Interrupt-driven I2C driver, with DMA for display writes. Both devices share I2C1 (GP14/GP15).
+- Bus traffic checked on a logic analyser (captures in [`signals/`](signals/)).
+
+<!-- TODO: photo of the board -->
 
 ## Hardware
 
@@ -20,39 +23,46 @@ Button network:
 
 - 10k from 3V3 to node A
 - button from node A to ground
-- 5k from node A to GP18 (two 10k in parallel -- see the E9 note below)
+- 5k from node A to GP18 (two 10k in parallel, see [RP2350-E9](#button-debouncing-and-rp2350-e9))
 - 100nF from GP18 to ground
 
 ## Build
 
-- `make` -- builds `build/firmware.uf2`
-- `make flash` -- `probe-rs download` + reset
-- `make run` -- flash and stream RTT
-- `make attach` -- stream RTT from an already-running target, no flash, no reset
-- `make uf2 DRIVE=/d` -- copy the image to a mounted BOOTSEL volume, no probe needed
+- `make`: builds `build/firmware.uf2`
+- `make flash`: `probe-rs download` + reset
+- `make run`: flash and stream RTT
+- `make attach`: stream RTT from an already-running target, no flash, no reset
+- `make uf2 DRIVE=/d`: copy the image to a mounted BOOTSEL volume, no probe needed
 
-Notes:
+Point `SDK` at the `src` directory of a `pico-sdk` checkout: `make SDK=/path/to/pico-sdk/src`.
+`flash`, `run` and `attach` need [`probe-rs`](https://probe.rs/) on PATH and a connected debug probe.
 
-- point `SDK` at the `src` directory of a `pico-sdk` checkout: `make SDK=/path/to/pico-sdk/src`
-- `flash`, `run` and `attach` need [`probe-rs`](https://probe.rs/) on PATH and a connected debug probe
+## Design notes
 
-## Components
+### I2C driver
 
-#### **Startup** (`entry.c`, `_crt0.c`, `link.ld`)
-- `entry.c` defines the vector table with irq and default handlers.
-  - also defines the boot block expected by the RP2350 *([datasheet section 5.9.5](https://pip-assets.raspberrypi.com/categories/1214-rp2350/documents/RP-008373-DS-2-rp2350-datasheet.pdf/#page=429))*.
-- `_crt0.c` sets the clock to the crystal oscillator, enables the fpu, copies `.data` over and zeroes `.bss`.
+`driver/i2c_state_machine.c`. Transfers are started asynchronously and an ISR pumps the TX FIFO and drains RX until
+`STOP`, then marks the bus done or errored (abort, overrun, early stop). Each bus has its own context, so the same
+code runs either controller. On init the driver checks the lines and, if a device is holding SDA low, clocks SCL
+and sends a `STOP` to free the bus.
 
-#### **I2C** (`driver/i2c_state_machine.c`)
-- ISR state machine with per-bus context
-- Three transfer paths: bulk read, sequential/alternating CPU writes, and a DMA write
-- Transfers are started asynchronously and the caller polls `i2c_poll_state()` 
-- I2C bus recovery sequence on reset
-- Tested on a usb logic analyser: `signals/`.
+### DMA frame writes
 
-#### **State Machine UML**
+The OLED framebuffer is stored as `u16` entries so the final I2C `STOP` bit can be encoded in the last word. That
+lets DMA push the whole frame straight into `IC_DATA_CMD`, without a completion IRQ or a polling loop to append the
+stop.
 
-The current app functions through a state machine:
+### Rendering while the bus is busy
+
+To keep the CPU busy while waiting for I2C, the next frame is rasterized during the sensor read, so the display
+always shows the previous sample. This gets
+[~47us of bus idle time](signals/bus%20idle%20time_v1.png) between transfers
+([before](signals/bus%20idle%20time_v0.png)). An indoor weather display doesn't need that kind of timing accuracy,
+and at 1 Hz there's plenty of time to do it sequentially, but part of the point of this project was to learn
+interrupts and concurrency.
+
+<details>
+<summary>App state machine</summary>
 
 ```mermaid
 %%{init: {"themeVariables": {"fontSize": "12px"}, "flowchart": {"defaultRenderer":"elk", "nodeSpacing": 40, "rankSpacing": 22, "padding": 6, "diagramPadding": 10, "curve": "linear", "subGraphTitleMargin": {"top": 4, "bottom": 20}}}}%%
@@ -86,37 +96,27 @@ flowchart TB
     OK -.-> DF
 ```
 
-Note: In order to keep the CPU busy while waiting for the I2C transfers I opted for always rendering the last sample
-of data rather than the current one. The current version achieves 
-[~47us of bus idle time](https://github.com/Vasilis-Narain/rp2350-baremetal-weather-station/blob/main/signals/bus%20idle%20time_v1.png)
-between transfers. This decision isn't negatively impacting this application as an indoor weather display doesn't need that much time accuracy.
-Of course, with a 1Hz sampling rate there is ample time to compensate and rasterize the current readings before writing to the display,
-but part of the aim of this project was to learn about interrupts and concurrency.
+</details>
 
-**Page selection** (`main.c`) -- the button cycles through four pages and the matching LED says which one is showing. Both edges are enabled
-on GP18. The irq handler timestamps every edge and ignores a falling edge arriving within 30ms of any other edge for software debouncing 
-(the design also features a double resistor hardware debounce circuit). 
-Button flag changes are polled by SysTick every 1ms and applied as soon as the bus is idle.
+### Button debouncing and RP2350-E9
 
-**RP2350-E9** -- Button debouncing issues.. [With the input buffer enabled and the pad sitting between logic
-levels, the pad leaks up to 120uA.](https://hackaday.com/2024/09/20/raspberry-pi-rp2350-e9-erratum-redefined-as-input-mode-leakage-current/) The erratum recommends external pull-downs of 8.2k or less (GPIO is pulled low 
-by R2 on switch press). My first attempt used 10k there, and with the button held the pin measured 1.53V, so presses did nothing. Noise during
-a display update chattered the edge detector instead. Dropping R2 to 5k puts the held level around 0.6V and it behaves. The
-pull-up side is unaffected, so the 10k from 3V3 stays as it is.
+Both edges are enabled on GP18. The IRQ handler timestamps every edge and ignores a falling edge within 30ms of any
+other edge, on top of the RC debounce in hardware. SysTick picks up the page change and applies it once the bus is
+idle.
 
-**OLED** (`driver/oled.c`) -- SSD1306 driver over the same I2C bus. 512-byte page-major framebuffer with pixel, bitmap and text rasterizers.
-The frame is stored as `u16` entries so the final I2C `STOP` bit can be encoded in the last word, which lets DMA push the whole frame
-into `IC_DATA_CMD` without a completion IRQ or a polling loop to append the stop.
+The first version didn't work: with the button held the pin measured 1.53V, so presses did nothing, and noise during
+a display update chattered the edge detector instead. This is erratum E9:
+[with the input buffer enabled and the pad sitting between logic levels, the pad leaks up to 120uA](https://hackaday.com/2024/09/20/raspberry-pi-rp2350-e9-erratum-redefined-as-input-mode-leakage-current/),
+and the recommended fix is an external pull-down of 8.2k or less. I had 10k. Dropping it to 5k puts the held level
+around 0.6V and it behaves. The pull-up side is unaffected, so the 10k from 3V3 stays.
 
-**Fonts** (`fonts.c`, `tools/font_convert.py`) -- three bitmap fonts stored in the SSD1306 page-major layout. Setting `#define MAIN_FONT 0(1,2..)` 
-reduces file size to just one font.
+### No libc
 
-**Writer** (`Writer.c`) -- buffered formatting, no `printf`. The idea was taken from Zig's `std.Io.Writer` interface: format into a caller-owned buffer and only do i/o on flush,
-reducing i/o calls. Not conformant to `printf`. `{d}` for int, `{u}` for uint, `{u:xb}` for a (`x`)hex (`b`) byte. Decimal to string using a two-digit-at-a-time
-lookup table based algorithm. Hex to string branchless SWAR algorithm, adapted from [here](https://johnnylee-sde.github.io/Fast-unsigned-integer-to-hex-string/).
-The same interface backs both sinks: one instance flushes to RTT, another rasterizes into the OLED framebuffer.
-
-**RTT** (`rtt.c`) -- Own SEGGER rtt implementation using the memory layout expected by the protocol. Using `probe-rs` to attach over SWD.
+- **Startup**: own vector table, boot block ([datasheet 5.9.5](https://pip-assets.raspberrypi.com/categories/1214-rp2350/documents/RP-008373-DS-2-rp2350-datasheet.pdf/#page=429)),
+  linker script and crt0 (crystal oscillator, FPU, `.data`/`.bss`).
+- **Logging**: own SEGGER RTT implementation, read with `probe-rs` over SWD.
+- **Formatting**: `Writer.c`, a small `printf` replacement based on Zig's `std.Io.Writer`: format into a buffer,
+  do I/O on flush. The same interface prints to RTT and draws text into the OLED framebuffer.
 
 ## TODO
 

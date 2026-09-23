@@ -22,9 +22,9 @@
 
 #define BTN_CH 18
 #define LED_GREEN_CH 19
-#define LED_RED_CH 20
+#define LED_BLUE_CH 20
 #define LED_YELLOW_CH 21
-#define LED_MASK (1u << LED_GREEN_CH) | (1u << LED_RED_CH) | (1u << LED_YELLOW_CH)
+#define LED_MASK (1u << LED_GREEN_CH) | (1u << LED_BLUE_CH) | (1u << LED_YELLOW_CH)
 
 #define BTN_CH_LEVEL_HIGH 9
 #define BTN_CH_LEVEL_LOW 8
@@ -167,13 +167,13 @@ void main() {
     //io_bank0_hw -> gpio function selection
     io_bank0_hw->io[PIN25].ctrl = GPIO_FUNC_SIO;
     io_bank0_hw->io[LED_GREEN_CH].ctrl = GPIO_FUNC_SIO;
-    io_bank0_hw->io[LED_RED_CH].ctrl = GPIO_FUNC_SIO;
+    io_bank0_hw->io[LED_BLUE_CH].ctrl = GPIO_FUNC_SIO;
     io_bank0_hw->io[LED_YELLOW_CH].ctrl = GPIO_FUNC_SIO;
 
     // Pads bank -> configure pads for led
     hw_clear_bits(&pads_bank0_hw->io[PIN25], PADS_BANK0_GPIO0_ISO_BITS);
     hw_clear_bits(&pads_bank0_hw->io[LED_GREEN_CH], PADS_BANK0_GPIO0_ISO_BITS);
-    hw_clear_bits(&pads_bank0_hw->io[LED_RED_CH], PADS_BANK0_GPIO0_ISO_BITS);
+    hw_clear_bits(&pads_bank0_hw->io[LED_BLUE_CH], PADS_BANK0_GPIO0_ISO_BITS);
     hw_clear_bits(&pads_bank0_hw->io[LED_YELLOW_CH], PADS_BANK0_GPIO0_ISO_BITS);
 
     // output enable SIO reg. Special atomic registers for SIO
@@ -374,7 +374,7 @@ static void write_result(Writer *writer, bme280_final_data *data, u32 channel_se
         break;
     case CH_HUM:
         sio_hw->gpio_clr = LED_MASK;
-        sio_hw->gpio_set = 1u << LED_RED_CH;
+        sio_hw->gpio_set = 1u << LED_BLUE_CH;
         print(writer, "HUMIDITY:\n{d}.{u>3}rH", hum_int, hum_frac);
         break;
     case CH_PRESS:
