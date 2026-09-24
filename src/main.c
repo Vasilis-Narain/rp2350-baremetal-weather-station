@@ -17,7 +17,7 @@
 #define EXT_CLK_FREQ_HZ 1000000
 #define SYSTICK_TOP (EXT_CLK_FREQ_HZ / SYSTICK_FREQ_HZ - 1)
 
-// Hardware gated by i2c bus to a minimum of roughly 52+-1ms
+// Hardware gated by i2c bus to a minimum of roughly 52+-1us
 #define MAIN_PERIOD_MS 1000
 
 #define BTN_CH 18
@@ -39,6 +39,8 @@
 #define BTN_LOCKOUT_MS 40
 #define BTN_CONFIRM_MS 30
 #define BTN_EDGE_MASK ((1u << BTN_CH_EDGE_LOW) | (1u << BTN_CH_EDGE_HIGH))
+
+#define PIN_MASK(pin) (1u << pin)
 
 typedef enum {
     APP_IDLE,
@@ -73,24 +75,24 @@ static b32 oled_is_configged = FALSE;
 static volatile app_state main_state = APP_IDLE;
 static volatile u32 ch_select = CH_LOGO;
 static volatile u32 ch_last = CH_LOGO;
-static volatile u32 last_edge_ms = 0;
-static volatile b32 btn_pending = FALSE;
-static volatile u32 btn_deadline = 0;
 
-void IO_IRQ_BANK0_Handler() {
-    u32 latched = io_bank0_hw->proc0_irq_ctrl.ints[2] & BTN_EDGE_MASK;
-
-    io_bank0_hw->intr[2] = latched;
-    (void)io_bank0_hw->intr[2];
-
-    u32 now = ms;
-    u32 quiet = (u32)(now - last_edge_ms);
-    last_edge_ms = now;
-
-    if ((latched & (1u << BTN_CH_EDGE_LOW)) && !btn_pending && quiet >= BTN_LOCKOUT_MS) {
-        btn_pending = TRUE;
-        btn_deadline = now + BTN_CONFIRM_MS;
+b32 raw_btn_pressed() {
+    u32 in = sio_hw->gpio_in & PIN_MASK(BTN_CH);
+    if (in) {
+        return FALSE;
+    } else {
+        return TRUE;
     }
+}
+
+// https://www.ganssle.com/item/debouncing-switches-contacts-hardware.htm
+b32 debounce_switch() {
+    static u32 state = 0;
+    state = (state << 1) | !raw_btn_pressed();
+    if (state == 0x80000000) { // return true if 1 followed by 31 zeroes (held low at least 31ms)
+        return TRUE;
+    }
+    return FALSE;
 }
 
 /* clk_sys must already be configured. Usually done in `crt0`*/
@@ -106,11 +108,8 @@ static void configure_systick(u8 cycles) {
 
 void SYSTICK_Handler() {
     ms++;
-    if (btn_pending && (i32)(ms - btn_deadline) >= 0) {
-        btn_pending = FALSE;
-        if (((sio_hw->gpio_in >> BTN_CH) & 1u) == 0) {
-            ch_select = (ch_select + 1) & 0x3;
-        }
+    if (debounce_switch()) {
+        ch_select = (ch_select + 1) & 0x3;
     }
     if (oled_is_configged && ch_last != ch_select && main_state == APP_IDLE) {
         main_state = APP_START_READ;
@@ -187,8 +186,7 @@ void main() {
         .scl_pin = GP15,
     };
 
-    // Enable btn irq
-    //pad_input_pullup(BTN_CH);
+    // Init button
     pads_bank0_hw->io[BTN_CH] = (pads_bank0_hw->io[BTN_CH] &
                                     ~(PADS_BANK0_GPIO0_OD_BITS |
                                         PADS_BANK0_GPIO0_PDE_BITS |
@@ -197,9 +195,6 @@ void main() {
 
     io_bank0_hw->io[BTN_CH].ctrl = GPIO_FUNC_SIO;
     hw_clear_bits(&pads_bank0_hw->io[BTN_CH], (PADS_BANK0_GPIO0_ISO_BITS));
-    io_bank0_hw->proc0_irq_ctrl.inte[2] |= BTN_EDGE_MASK;
-
-    m33_hw->nvic_iser[ISER_ARRAY_INDEX(IO_IRQ_BANK0)] |= ISER_ARRAY_BIT(IO_IRQ_BANK0);
 
     // I2C master enable
     i2c_init_master(&i2c1_cfg);
