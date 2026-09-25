@@ -36,10 +36,6 @@
 #define CH_HUM 0x2
 #define CH_PRESS 0x3
 
-#define BTN_LOCKOUT_MS 40
-#define BTN_CONFIRM_MS 30
-#define BTN_EDGE_MASK ((1u << BTN_CH_EDGE_LOW) | (1u << BTN_CH_EDGE_HIGH))
-
 #define PIN_MASK(pin) (1u << pin)
 
 typedef enum {
