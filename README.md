@@ -17,13 +17,15 @@ A button cycles between display pages, with an LED showing which page is active.
 - BME280 breakout (Pimoroni)
 - SSD1306 128x32 OLED
 - 4-pin tactile button on GP18
-- Indicator LEDs on GP19 (green), GP20 (red), GP21 (yellow)
+- Indicator LEDs on GP19 (green), GP20 (blue), GP21 (yellow), 220R each
+
+Full schematic: [`schematic.pdf`](schematic.pdf).
 
 Button network:
 
-- 10k from 3V3 to node A
+- 100k from 3V3 to node A
 - button from node A to ground
-- 5k from node A to GP18 (two 10k in parallel, see [RP2350-E9](#button-debouncing-and-rp2350-e9))
+- 5.1k from node A to GP18 (see [RP2350-E9](#button-debouncing-and-rp2350-e9))
 - 100nF from GP18 to ground
 
 ## Build
@@ -79,15 +81,13 @@ flowchart TB
     end
 
     subgraph ISR 
-        BTN["GPIO IRQ<br/>debounce, ch_select++"]
-        SYS["SysTick IRQ, 1 kHz<br/>page changed or 1 s elapsed:<br/>main_state = APP_START_READ"]
+        SYS["SysTick IRQ, 1 kHz<br/>sample button, ch_select++<br/>page changed or 1 s elapsed:<br/>main_state = APP_START_READ"]
         ISR["I2C ISR pumps TX, drains RX<br/>STOP sets bus DONE or ERROR"]
         DF["DMA feeds IC_DATA_CMD<br/>STOP sets bus DONE"]
     end
 
     I <-.WFI.-> SYS
     SYS -.-> I
-    BTN -.-> SYS
     SYS -.-> S
     S -.-> ISR
     DF -.-> W
@@ -100,15 +100,16 @@ flowchart TB
 
 ### Button debouncing and RP2350-E9
 
-Both edges are enabled on GP18. The IRQ handler timestamps every edge and ignores a falling edge within 30ms of any
-other edge, on top of the RC debounce in hardware. SysTick picks up the page change and applies it once the bus is
-idle.
+GP18 has no interrupt. The 1 kHz SysTick handler samples the pin into a 32-bit shift register and counts a press
+when one released sample is followed by 31 pressed ones (~31ms held low), on top of the RC debounce in hardware
+([Ganssle](https://www.ganssle.com/item/debouncing-switches-contacts-hardware.htm)). The page change is applied once
+the bus is idle.
 
 The first version didn't work: with the button held the pin measured 1.53V, so presses did nothing, and noise during
 a display update chattered the edge detector instead. This is erratum E9:
 [with the input buffer enabled and the pad sitting between logic levels, the pad leaks up to 120uA](https://hackaday.com/2024/09/20/raspberry-pi-rp2350-e9-erratum-redefined-as-input-mode-leakage-current/),
-and the recommended fix is an external pull-down of 8.2k or less. I had 10k. Dropping it to 5k puts the held level
-around 0.6V and it behaves. The pull-up side is unaffected, so the 10k from 3V3 stays.
+and the recommended fix is an external pull-down of 8.2k or less. I had 10k. Dropping it to 5.1k puts the held level
+around 0.6V. The pull-up side is unaffected by E9.
 
 ### No libc
 
@@ -120,5 +121,4 @@ around 0.6V and it behaves. The pull-up side is unaffected, so the 10k from 3V3 
 
 ## TODO
 
-- KiCad schematic
 - Use forced mode rather than normal mode for the BME280 sensor
