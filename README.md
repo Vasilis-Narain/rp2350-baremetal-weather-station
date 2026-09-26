@@ -4,7 +4,7 @@ Firmware for a Pico 2 that reads a BME280 (temperature, pressure, humidity) and 
 A button cycles between display pages, with an LED showing which page is active.
 
 - Written in C with no SDK, HAL or libc. Only the register and struct headers from `pico-sdk` are used.
-- 10.6 KB flash, no heap.
+- 10.9 KB flash, no heap.
 - Interrupt-driven I2C driver, with DMA for display writes. Both devices share I2C1 (GP14/GP15).
 - Bus traffic checked on a logic analyser (captures in [`signals/`](signals/)).
 
@@ -23,7 +23,7 @@ Full schematic: [`schematic.pdf`](schematic.pdf).
 
 Button network:
 
-- 100k from 3V3 to node A
+- 200k from 3V3 to node A
 - button from node A to ground
 - 5.1k from node A to GP18 (see [RP2350-E9](#button-debouncing-and-rp2350-e9))
 - 100nF from GP18 to ground
@@ -57,7 +57,8 @@ stop.
 ### Rendering while the bus is busy
 
 To keep the CPU busy while waiting for I2C, the next frame is rasterized during the sensor read, so the display
-always shows the previous sample. This gets
+always shows the previous sample. To keep the first frame from showing zeroes, `first_read_delay` does one
+blocking read at boot to seed it. This gets
 [~47us of bus idle time](signals/bus%20idle%20time_v1.png) between transfers
 ([before](signals/bus%20idle%20time_v0.png)). An indoor weather display doesn't need that kind of timing accuracy,
 and at 1 Hz there's plenty of time to do it sequentially, but part of the point of this project was to learn
@@ -71,7 +72,8 @@ interrupts and concurrency.
 flowchart TB
     subgraph MAIN["Main loop"]
         I["APP_IDLE"]
-        S["APP_START_READ<br/>issue BME280 read"] --> R["rasterize frame"]
+        S["APP_START_READ<br/>trigger forced measurement"] --> WK["APP_SENSOR_WAKING<br/>wait for conversion<br/>issue BME280 read"]
+        WK --> R["rasterize frame"]
         R --> RD["APP_READING<br/>wait for STOP"]
         RD --> OK{"read OK?"}
         OK -- yes --> C["compensate raw data"]
@@ -98,6 +100,13 @@ flowchart TB
 
 </details>
 
+### BME280 forced mode
+
+The sensor sleeps between samples. Each cycle writes `ctrl_meas` with the mode set to forced, waits out the
+measurement, then reads the data registers. The wait is the datasheet worst case for the configured oversampling
+(`1.25 + 2.3*T + 2.3*P + 0.575 + 2.3*H + 0.575` ms), worked out once in `bme280_set_config`, so 10 ms at 1x.
+The main loop sits in `APP_SENSOR_WAKING` and checks it against the SysTick counter instead of blocking.
+
 ### Button debouncing and RP2350-E9
 
 GP18 has no interrupt. The 1 kHz SysTick handler samples the pin into a 32-bit shift register and counts a press
@@ -118,7 +127,3 @@ around 0.6V. The pull-up side is unaffected by E9.
 - **Logging**: own SEGGER RTT implementation, read with `probe-rs` over SWD.
 - **Formatting**: `Writer.c`, a small `printf` replacement based on Zig's `std.Io.Writer`: format into a buffer,
   do I/O on flush. The same interface prints to RTT and draws text into the OLED framebuffer.
-
-## TODO
-
-- Use forced mode rather than normal mode for the BME280 sensor
