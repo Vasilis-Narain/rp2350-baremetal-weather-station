@@ -13,13 +13,15 @@
 #define BME280_T_SB_LSB (5)
 #define BME280_FILTER_LSB (2)
 
+#define BME280_OVERSAMPLING_MASK 0x7
+
 // default settings for Humidity Sensing (from datasheet):
 // Sensor mode: forced (@ 1 sample/second) or normal
-// Oversampling settings: pressure x0, temperature x1, humidity x1
+// Oversampling settings: pressure x1, temperature x1, humidity x1
 // IIR filter settings: filter off
 #define BME280_DEFAULT_CTRL_MEAS ((BME280_OVERSAMPLING_1X << BME280_OSR_T_LSB) | \
                                   (BME280_OVERSAMPLING_1X << BME280_OSR_P_LSB) | \
-                                  (BME280_POWERMODE_NORMAL << BME280_MODE_LSB))
+                                  (BME280_POWERMODE_SLEEP << BME280_MODE_LSB))
 
 #define BME280_DEFAULT_CTRL_HUM (BME280_OVERSAMPLING_1X << BME280_OSR_H_LSB)
 
@@ -85,6 +87,8 @@ i32 bme280_start_read_raw_data(volatile bme280_raw_data_t *raw_data);
 i32 bme280_get_calib_params(bme280_calib_t *calib_params);
 
 i32 bme280_set_config(bme280_config_t settings);
+
+i32 bme280_set_forced_mode();
 
 // Returns struct holding compensated values.
 bme280_final_data bme280_compensate_data(const bme280_calib_t *calib_params, const volatile bme280_raw_data_t *raw_data);

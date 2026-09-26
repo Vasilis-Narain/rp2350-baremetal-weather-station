@@ -1,6 +1,8 @@
 #include "bme280.h"
 static i32 get_tp_params(bme280_calib_t *calib_params);
 static i32 get_hum_params(bme280_calib_t *calib_params);
+static inline void bme280_set_oversampling_wait(bme280_config_t *config_data);
+static inline u8 bme280_translate_oversampling(u8 data);
 
 static i2c_lane_t lane;
 
@@ -31,12 +33,17 @@ i32 bme280_start_read_raw_data(volatile bme280_raw_data_t *raw_data) {
     return 0;
 }
 
+static u8 bme280_forced_mode_wait_ms = 0;
+static u8 bme280_forced_mode_ctrl_meas = 0;
+
 i32 bme280_set_config(bme280_config_t settings) {
     u8 config_addresses[] = {
         BME280_REG_CONFIG,
         BME280_REG_CTRL_HUM,
         BME280_REG_CTRL_MEAS,
     };
+
+    bme280_set_oversampling_wait(&settings);
 
     u8 config_data[] = {
         settings.config,
@@ -55,6 +62,70 @@ i32 bme280_set_config(bme280_config_t settings) {
     }
 
     return i2c_wait_completion(lane);
+}
+
+static inline void bme280_set_oversampling_wait(bme280_config_t *config_data) {
+    bme280_forced_mode_ctrl_meas = (config_data->ctrl_meas & 0xFC) | (BME280_POWERMODE_FORCED << BME280_MODE_LSB);
+
+    u8 temp = bme280_translate_oversampling((config_data->ctrl_meas >> BME280_OSR_T_LSB) & BME280_OVERSAMPLING_MASK);
+    u8 press = bme280_translate_oversampling((config_data->ctrl_meas >> BME280_OSR_P_LSB) & BME280_OVERSAMPLING_MASK);
+    u8 hum = bme280_translate_oversampling((config_data->ctrl_hum >> BME280_OSR_H_LSB) & BME280_OVERSAMPLING_MASK);
+
+    // datasheet provided formula for worst case timing
+    u32 wait_us = (1250 + (2300 * temp) +
+                   ((press > 0) ? (2300 * press + 575) : 0) +
+                   ((hum > 0) ? (2300 * hum + 575) : 0));
+
+    bme280_forced_mode_wait_ms = (u8)(wait_us / 1000) + 1; // + 1 ms for safety
+}
+
+static inline u8 bme280_translate_oversampling(u8 data) {
+    switch (data) {
+    case 0:
+        return 0;
+    case BME280_OVERSAMPLING_1X:
+        return 1;
+    case BME280_OVERSAMPLING_2X:
+        return 2;
+    case BME280_OVERSAMPLING_4X:
+        return 4;
+    case BME280_OVERSAMPLING_8X:
+        return 8;
+    default:
+        return 16;
+    }
+}
+
+// Function to set forced mode
+// timing for measurements to complete:
+//   t_measure_typical = 1 + [2 * T_oversampling] + [2 * P_oversampling + 0.5] + [2 * H_oversampling + 0.5]
+//   t_measure_max = 1.25 + [2.3 * T_oversampling] + [2.3 * P_oversampling + 0.575] + [2.3 * H_oversampling + 0.575]
+//
+//   ODR_max_force (max sampling rate) = 1000 / t_measure
+//
+// for default values (*_oversampling = 1):
+//   t_measure_typical = 8ms
+//   t_measure_max = 9.3ms
+//   ODR_max = 107Hz
+//
+//  safe wait = 10ms - should be time enough for the i2c write to complete too (~3 bytes via i2c @~93hz ~= 240 us)
+//
+// returns minimum wait time in ms (or -1 for bus busy)
+//
+i32 bme280_set_forced_mode() {
+    u8 addr = BME280_REG_CTRL_MEAS;
+
+    i2c_address_data_pair_array data_pairs = {
+        .addresses = &addr,
+        .data = &bme280_forced_mode_ctrl_meas,
+        .capacity = 1,
+    };
+
+    if (i2c_start_bulk_write_alternating_async(lane, BME280_I2C_ADDR_PRIM, &data_pairs)) {
+        return I2C_BUS_BUSY;
+    }
+
+    return bme280_forced_mode_wait_ms;
 }
 
 // blocking function to get calib data

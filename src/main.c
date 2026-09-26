@@ -41,6 +41,7 @@
 typedef enum {
     APP_IDLE,
     APP_START_READ,
+    APP_SENSOR_WAKING,
     APP_READING,
     APP_WRITING,
 } app_state;
@@ -51,6 +52,7 @@ static void log_fault(Writer *writer, i2c_lane_t lane);
 static void log_result(Writer *writer, bme280_final_data *data);
 static void write_result(Writer *writer, bme280_final_data *data, u32 channel_select);
 static void configure_systick(u8 cycles);
+static void first_read_delay(i2c_lane_t lane, bme280_calib_t *calib_params);
 
 // statics and globals
 // Systick
@@ -71,6 +73,7 @@ static b32 oled_is_configged = FALSE;
 static volatile app_state main_state = APP_IDLE;
 static volatile u32 ch_select = CH_LOGO;
 static volatile u32 ch_last = CH_LOGO;
+static u32 waking_until = 0;
 
 b32 raw_btn_pressed() {
     u32 in = sio_hw->gpio_in & PIN_MASK(BTN_CH);
@@ -210,7 +213,7 @@ void main() {
     bme280_config_t config_data = {
         .config = BME280_DEFAULT_CONFIG,
         .ctrl_hum = BME280_DEFAULT_CTRL_HUM,
-        .ctrl_meas = BME280_DEFAULT_CTRL_MEAS,
+        .ctrl_meas = BME280_DEFAULT_CTRL_MEAS, // init to sleep mode
     };
 
     i32 config_error = bme280_set_config(config_data);
@@ -221,9 +224,6 @@ void main() {
         PANIC;
     }
 
-    // Delay for first conversion after setting normal mode.
-    delay_ms(10);
-
     u8 readback[4];
     i2c_start_bulk_read_async(i2c1_cfg.lane, BME280_I2C_ADDR_PRIM, BME280_REG_CTRL_HUM, readback, 4); //0xf2..0xf5
     i32 readback_err = i2c_wait_completion(i2c1_cfg.lane);
@@ -233,7 +233,7 @@ void main() {
         PANIC;
     }
 
-    if (readback[0] == config_data.ctrl_hum && readback[2] == config_data.ctrl_meas && readback[3] == config_data.config) {
+    if (readback[0] == config_data.ctrl_hum && readback[2] == (config_data.ctrl_meas & 0xFC) && readback[3] == config_data.config) {
         write_all(rtt_writer, "\nBME280 SETUP " ANSI_GREEN "OK" ANSI_CLEAR "\n");
         bme280_is_configged = TRUE;
     } else {
@@ -244,6 +244,9 @@ void main() {
         PANIC;
     }
     flush(rtt_writer);
+
+    // avoid 0 reading due to off-by-one frame lag in architecture
+    first_read_delay(i2c1_cfg.lane, &calib_params);
 
     // Initialise OLED
     b32 oled_err = oled_init(oled_init_commands, i2c1_cfg.lane, 0);
@@ -259,13 +262,36 @@ void main() {
     for (;;) {
         switch (main_state) {
         case APP_START_READ: {
-            if (bme280_start_read_raw_data(&raw_data) == 0) {
-                main_state = APP_READING;
-                u32 ch = ch_last;
-                oled_clear();
-                write_result(oled_writer, &last_data, ch);
-                oled_commit_tx_buffer();
+            i32 wait_ms = bme280_set_forced_mode();
+            if (wait_ms != I2C_BUS_BUSY) {
+                main_state = APP_SENSOR_WAKING;
+                waking_until = ms + wait_ms;
             }
+            break;
+        }
+
+        case APP_SENSOR_WAKING: {
+            i2c_state i2c1_state = i2c_poll_state(i2c1_cfg.lane);
+
+            if (i2c1_state == I2C_WRITING) {
+                break;
+            }
+
+            if (i2c1_state == I2C_ERROR) {
+                log_fault(rtt_writer, i2c1_cfg.lane);
+            }
+
+            if ((i32)(ms - waking_until) >= 0) {
+                if (bme280_start_read_raw_data(&raw_data) == 0) {
+                    main_state = APP_READING;
+                    u32 ch = ch_last;
+                    oled_clear();
+                    write_result(oled_writer, &last_data, ch);
+                    oled_commit_tx_buffer();
+                }
+            }
+
+            i2c_release(i2c1_cfg.lane);
             break;
         }
 
@@ -355,7 +381,6 @@ static void write_result(Writer *writer, bme280_final_data *data, u32 channel_se
     switch (channel_select) {
     case CH_LOGO:
         sio_hw->gpio_set = LED_MASK;
-        //print(writer, "{d}.{u>2}C {d}.{u>3}rH\n{d}.{u>2}hPa", temp_int, temp_frac, hum_int, hum_frac, press_int, press_frac);
         oled_draw_bitmap(0, 0, 128, 32, orsuka_industries_logo, FALSE);
         break;
     case CH_TEMP:
@@ -377,4 +402,13 @@ static void write_result(Writer *writer, bme280_final_data *data, u32 channel_se
         break;
     }
     flush(writer);
+}
+
+static void first_read_delay(i2c_lane_t lane, bme280_calib_t *calib_params) {
+    i32 wait_ms = bme280_set_forced_mode();
+    i2c_wait_completion(lane);
+    delay_ms(wait_ms);
+    bme280_start_read_raw_data(&raw_data);
+    i2c_wait_completion(lane);
+    last_data = bme280_compensate_data(calib_params, &raw_data);
 }
