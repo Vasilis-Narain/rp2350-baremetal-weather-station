@@ -4,6 +4,17 @@
 #include <hardware/regs/clocks.h>
 #include <hardware/structs/xosc.h>
 #include <hardware/structs/scb.h>
+#include <hardware/structs/ticks.h>
+
+#define TIMER0_CYCLES_FOR_1_US 12u
+
+#define _config_timer(generator, cycles_to_tick)                                              \
+    do {                                                                                      \
+        ticks_hw->ticks[generator].ctrl = TICKS_TIMER0_CTRL_ENABLE_BITS;                      \
+        ticks_hw->ticks[generator].cycles = cycles_to_tick;                                   \
+        ticks_hw->ticks[generator].ctrl = 0;                                                  \
+        while (!(ticks_hw->ticks[generator].ctrl & (1u << TICKS_TIMER0_CTRL_RUNNING_LSB))) {} \
+    } while (0)
 
 extern u8 __data_start[];
 extern u8 __data_end[];
@@ -20,6 +31,7 @@ extern void main();
 __attribute__((noreturn)) void _crt0() {
     _config_sys_clock();
     _config_ref_clock();
+    _config_timer(TICK_TIMER0, TIMER0_CYCLES_FOR_1_US);
     _enable_fpu();
 
     // Copy data segment
