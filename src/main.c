@@ -11,7 +11,7 @@
 
 #define PIN25 25
 
-#define RESETS_CLEAR (RESETS_RESET_IO_BANK0_BITS | RESETS_RESET_PADS_BANK0_BITS)
+#define RESETS_CLEAR (RESETS_RESET_IO_BANK0_BITS | RESETS_RESET_PADS_BANK0_BITS | RESETS_RESET_TIMER0_BITS)
 
 // Hardware gated by i2c bus to a minimum of roughly 52+-1us
 #define MAIN_PERIOD_MS 1000
@@ -48,7 +48,6 @@ void timer0_set_alarm_us(u8 alarm_number, u32 time_to_wait_us);
 #define timer0_set_alarm_ms(alarm_number, time_to_wait_ms) timer0_set_alarm_us(alarm_number, 1000 * time_to_wait_ms)
 
 // local functions
-static inline void delay_ms(u32 ms_to_wait);
 static void log_fault(Writer *writer, i2c_lane_t lane);
 static void log_result(Writer *writer, bme280_final_data *data);
 static void write_result(Writer *writer, bme280_final_data *data, u32 channel_select);
@@ -56,10 +55,6 @@ static void write_result(Writer *writer, bme280_final_data *data, u32 channel_se
 static void first_read_delay(i2c_lane_t lane, bme280_calib_t *calib_params);
 
 // statics and globals
-// Systick
-volatile u32 ms = 0;
-volatile u32 next = 500;
-
 // bme280
 static volatile bme280_raw_data_t raw_data;
 static bme280_final_data last_data;
@@ -74,7 +69,6 @@ static b32 oled_is_configged = FALSE;
 static volatile app_state main_state = APP_IDLE;
 static volatile u32 ch_select = CH_LOGO;
 static volatile u32 ch_last = CH_LOGO;
-static u32 waking_until = 0;
 
 b32 raw_btn_pressed() {
     u32 in = sio_hw->gpio_in & PIN_MASK(BTN_CH);
@@ -85,45 +79,36 @@ b32 raw_btn_pressed() {
     }
 }
 
-#define DEBOUNCE_MS 25
+#define DEBOUNCE_MS 15
+#define DEBOUNCE_WINDOW_MS (DEBOUNCE_MS + 15)
 #define DEBOUNCE_MS_HEX ((u32)((i32)0x80000000 >> (31 - (DEBOUNCE_MS + 1))))
 #define DEBOUNCE_MS_HEX_MASK (DEBOUNCE_MS_HEX << 1)
+static u32 btn_history = 1;
 // https://www.ganssle.com/item/debouncing-switches-contacts-hardware.htm
 b32 debounce_switch() {
-    static u32 state = 1;                                             // gets called 1 ms after gpio interrupt
-    state = (state << 1) | !raw_btn_pressed() | DEBOUNCE_MS_HEX_MASK; // 26 zeroes
-    if (state == DEBOUNCE_MS_HEX) {                                   // return true if 1 followed by 25 zeroes (held low at least 25ms)
+    btn_history = (btn_history << 1) | !raw_btn_pressed() | DEBOUNCE_MS_HEX_MASK; // 26 zeroes
+    if (btn_history == DEBOUNCE_MS_HEX) {                                         // return true if 1 followed by 25 zeroes (held low at least 25ms)
         return TRUE;
     }
     return FALSE;
 }
 
-/*
-// clk_sys must already be configured. Usually done in `crt0`
-static void configure_systick(u8 cycles) {
-    ticks_hw->ticks[TICK_PROC0].cycles = cycles;
-    ticks_hw->ticks[TICK_PROC0].ctrl = TICKS_PROC0_CTRL_ENABLE_BITS;
-    while (!(ticks_hw->ticks[TICK_PROC0].ctrl & TICKS_PROC0_CTRL_RUNNING_BITS)) {}
-
-    m33_hw->syst_rvr = SYSTICK_TOP;
-    m33_hw->syst_cvr = 0;
-    m33_hw->syst_csr = M33_SYST_CSR_TICKINT_BITS | M33_SYST_CSR_ENABLE_BITS;
-}
-*/
-
 #define BTN_EVENT (1u << 0)
 #define TICK_EVENT (1u << 1)
+#define WOKEN_EVENT (1u << 2)
 #define ALARM_TICK 0
 #define ALARM_TICK_MASK (1u << ALARM_TICK)
 #define ALARM_DEBOUNCE 1
 #define ALARM_DEBOUNCE_MASK (1u << ALARM_DEBOUNCE)
-#define ALARMS_MASK (ALARM_TICK_MASK | ALARM_DEBOUNCE_MASK)
+#define ALARM_WAKING 2
+#define ALARM_WAKING_MASK (1u << ALARM_WAKING)
+#define ALARMS_MASK (ALARM_TICK_MASK | ALARM_DEBOUNCE_MASK | ALARM_WAKING_MASK)
 
 static volatile u8 events = 0;
 
 void TIMER0_IRQ_0_Handler() {
     u32 triggered = timer0_hw->ints & ALARMS_MASK;
-    hw_clear_bits(&timer0_hw->intr, triggered);
+    timer0_hw->intr = triggered; // write 1 to clear
 
     if (triggered & ALARM_TICK_MASK) {
         events |= TICK_EVENT;
@@ -135,18 +120,28 @@ void TIMER0_IRQ_0_Handler() {
             events |= BTN_EVENT;
             tries = 1;
         } else {
-            if (tries++ < DEBOUNCE_MS) {
+            if (tries++ <= DEBOUNCE_WINDOW_MS) {
                 timer0_set_alarm_ms(ALARM_DEBOUNCE, 1);
             } else {
                 tries = 1;
+                hw_set_bits(&io_bank0_hw->proc0_irq_ctrl.inte[BTN_CH_PROC_INDEX], 1u << BTN_CH_EDGE_LOW); // re enable button irq
             }
         }
     }
+
+    if (triggered & ALARM_WAKING_MASK) {
+        events |= WOKEN_EVENT;
+    }
 }
+void TIMER0_IRQ_1_Handler() __attribute__((alias("TIMER0_IRQ_0_Handler")));
+void TIMER0_IRQ_2_Handler() __attribute__((alias("TIMER0_IRQ_0_Handler")));
 
 void IO_IRQ_BANK0_Handler() {
     u32 triggered = io_bank0_hw->proc0_irq_ctrl.ints[BTN_CH_PROC_INDEX] & (1u << BTN_CH_EDGE_LOW);
-    hw_clear_bits(&io_bank0_hw->proc0_irq_ctrl.inte[BTN_CH_PROC_INDEX], triggered);
+    hw_clear_bits(&io_bank0_hw->proc0_irq_ctrl.inte[BTN_CH_PROC_INDEX], triggered); // disable irq
+    io_bank0_hw->intr[BTN_CH_PROC_INDEX] = triggered;                               // clear latch
+    (void)io_bank0_hw->intr[BTN_CH_PROC_INDEX];
+    btn_history = 1; // gets called 1 ms after gpio interrupt
     timer0_set_alarm_ms(ALARM_DEBOUNCE, 1);
 }
 
@@ -157,12 +152,20 @@ void timer0_set_alarm_us(u8 alarm_number, u32 time_to_wait_us) {
     hw_set_bits(&timer0_hw->inte, 1u << alarm_number);
 
     // enable interrupt at processor level
-    hw_set_bits(&m33_hw->nvic_iser[0], 1u << alarm_number); // works for timer0 only, need 4 + number for timer1
+    m33_hw->nvic_iser[0] = 1u << alarm_number; // works for timer0 only, need 4 + number for timer1
 
     // valid for all delay < UINT32_MAX
     u32 target_us = timer0_hw->timerawl + time_to_wait_us;
     timer0_hw->alarm[alarm_number] = target_us;
 }
+
+static inline void delay_us(u32 us_to_wait) {
+    u32 start = timer0_hw->timerawl;
+    while (timer0_hw->timerawl - start < us_to_wait) {
+        __asm__ volatile("nop");
+    }
+}
+#define delay_ms(ms_to_wait) delay_us(1000 * ms_to_wait)
 
 void resets_clear(u32 mask) {
     hw_clear_bits(&resets_hw->reset, mask);
@@ -215,9 +218,6 @@ void main() {
     // output enable SIO reg. Special atomic registers for SIO
     sio_hw->gpio_oe_set = (1u << PIN25) | LED_MASK;
 
-    // clk_sys must be configured before calling this function.
-    //configure_systick(SYST_CYCLES);
-
     i2c_config i2c1_cfg = {
         .sda_pin = GP14,
         .scl_pin = GP15,
@@ -233,7 +233,7 @@ void main() {
     io_bank0_hw->io[BTN_CH].ctrl = GPIO_FUNC_SIO;
     hw_clear_bits(&pads_bank0_hw->io[BTN_CH], (PADS_BANK0_GPIO0_ISO_BITS));
     hw_set_bits(&io_bank0_hw->proc0_irq_ctrl.inte[BTN_CH_PROC_INDEX], 1u << BTN_CH_EDGE_LOW);
-    hw_set_bits(&m33_hw->nvic_iser[0], IO_IRQ_BANK0);
+    m33_hw->nvic_iser[0] = 1u << IO_IRQ_BANK0;
 
     // I2C master enable
     i2c_init_master(&i2c1_cfg);
@@ -253,7 +253,7 @@ void main() {
     bme280_config_t config_data = {
         .config = BME280_DEFAULT_CONFIG,
         .ctrl_hum = BME280_DEFAULT_CTRL_HUM,
-        .ctrl_meas = BME280_DEFAULT_CTRL_MEAS, // init to sleep mode
+        .ctrl_meas = BME280_DEFAULT_CTRL_MEAS,
     };
 
     i32 config_error = bme280_set_config(config_data);
@@ -299,18 +299,27 @@ void main() {
         oled_is_configged = TRUE;
     }
 
+    // Start state machine
+    events |= TICK_EVENT;
+    u8 woken = 0;
     for (;;) {
         u8 flags = events;
         if (flags & BTN_EVENT) {
             events &= ~BTN_EVENT;
-            hw_set_bits(&io_bank0_hw->proc0_irq_ctrl.inte[BTN_CH_PROC_INDEX], 1u << BTN_CH_EDGE_LOW); // re enable button irq
             ch_select = (ch_select + 1) & 0x3;
         }
 
-        if ((flags & TICK_EVENT) && (main_state == APP_IDLE)) {
+        if (((flags & TICK_EVENT) || (ch_last != ch_select)) && (main_state == APP_IDLE)) {
             events &= ~TICK_EVENT;
-            timer0_set_alarm_ms(ALARM_TICK, 1000);
+            hw_set_bits(&io_bank0_hw->proc0_irq_ctrl.inte[BTN_CH_PROC_INDEX], 1u << BTN_CH_EDGE_LOW); // re enable button irq
+            ch_last = ch_select;
+            timer0_set_alarm_ms(ALARM_TICK, MAIN_PERIOD_MS);
             main_state = APP_START_READ;
+        }
+
+        if (flags & WOKEN_EVENT) {
+            events &= ~WOKEN_EVENT;
+            woken = 1;
         }
 
         switch (main_state) {
@@ -318,7 +327,7 @@ void main() {
             i32 wait_ms = bme280_set_forced_mode();
             if (wait_ms != I2C_BUS_BUSY) {
                 main_state = APP_SENSOR_WAKING;
-                waking_until = ms + wait_ms;
+                timer0_set_alarm_ms(ALARM_WAKING, wait_ms);
             }
             break;
         }
@@ -334,8 +343,9 @@ void main() {
                 log_fault(rtt_writer, i2c1_cfg.lane);
             }
 
-            if ((i32)(ms - waking_until) >= 0) {
+            if (woken) {
                 if (bme280_start_read_raw_data(&raw_data) == 0) {
+                    woken = 0;
                     main_state = APP_READING;
                     u32 ch = ch_last;
                     oled_clear();
@@ -395,13 +405,6 @@ void main() {
             WFI;
             break;
         }
-    }
-}
-
-static inline void delay_ms(u32 ms_to_wait) {
-    u32 wait_until = ms + ms_to_wait;
-    while ((i32)(ms - wait_until) < 0) {
-        WFI;
     }
 }
 

@@ -10,9 +10,9 @@
 
 #define _config_timer(generator, cycles_to_tick)                                              \
     do {                                                                                      \
-        ticks_hw->ticks[generator].ctrl = TICKS_TIMER0_CTRL_ENABLE_BITS;                      \
-        ticks_hw->ticks[generator].cycles = cycles_to_tick;                                   \
         ticks_hw->ticks[generator].ctrl = 0;                                                  \
+        ticks_hw->ticks[generator].cycles = cycles_to_tick;                                   \
+        ticks_hw->ticks[generator].ctrl = TICKS_TIMER0_CTRL_ENABLE_BITS;                      \
         while (!(ticks_hw->ticks[generator].ctrl & (1u << TICKS_TIMER0_CTRL_RUNNING_LSB))) {} \
     } while (0)
 
