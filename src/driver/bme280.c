@@ -113,7 +113,7 @@ static inline u8 bme280_translate_oversampling(u8 data) {
 // returns minimum wait time in ms (or -1 for bus busy)
 //
 i32 bme280_set_forced_mode() {
-    u8 addr = BME280_REG_CTRL_MEAS;
+    static u8 addr = BME280_REG_CTRL_MEAS;
 
     i2c_address_data_pair_array data_pairs = {
         .addresses = &addr,

@@ -57,7 +57,7 @@ extern void writer_error(const char *str, u32 length);
 
 #define RT_ASSERT(expr, msg)                                            \
     do {                                                                \
-        if (!expr) {                                                    \
+        if (!(expr)) {                                                  \
             writer_error("ASSERT:: " msg, sizeof("ASSERT:: " msg) - 1); \
             PANIC;                                                      \
         }                                                               \
