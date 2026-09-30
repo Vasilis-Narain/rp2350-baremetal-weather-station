@@ -68,7 +68,7 @@
 #define OLED_CMD_VAL_PAGE_START 0x00
 #define OLED_CMD_VAL_PAGE_END 0x03 // 32px = 4 pages
 
-/* Software init flow
+/* Software init flow (from datasheet)
 * Set Mux Ratio
 * Set Display Offset
 * Set display start line
