@@ -4,7 +4,8 @@ Firmware for a Pico 2 that reads a BME280 (temperature, pressure, humidity) and 
 A button cycles between display pages, with an LED showing which page is active.
 
 - Written in C with no SDK, HAL or libc. Only the register and struct headers from `pico-sdk` are used.
-- 10.9 KB flash, no heap.
+- 11.2 KB flash, no heap.
+- Event-driven main loop: timer and GPIO interrupts post events, and the core sits in `WFI` between cycles.
 - Interrupt-driven I2C driver, with DMA for display writes. Both devices share I2C1 (GP14/GP15).
 - Bus traffic checked on a logic analyser (captures in [`signals/`](signals/)).
 
@@ -54,6 +55,20 @@ The OLED framebuffer is stored as `u16` entries so the final I2C `STOP` bit can 
 lets DMA push the whole frame straight into `IC_DATA_CMD`, without a completion IRQ or a polling loop to append the
 stop.
 
+### Event-driven main loop
+
+Nothing runs on a fixed tick. Three TIMER0 alarms and the GP18 edge interrupt drive everything, and their handlers
+only set bits in an `events` word:
+
+- alarm 0: 1 s sample period (`TICK_EVENT`)
+- alarm 1: 1 ms button debounce sampling, armed only after a press edge (`BTN_EVENT`)
+- alarm 2: BME280 conversion wait (`WOKEN_EVENT`)
+
+The main loop consumes the events and advances the app state machine. In `APP_IDLE` it executes `WFI`, so between
+cycles the core is halted until the next interrupt. This is plain `WFI`: clocks and peripherals keep running, there
+is no deep sleep or dormant mode. Outside `APP_IDLE` (the conversion wait and bus transfers) the loop still polls.
+TIMER0 is clocked at 1 MHz from the 12 MHz crystal, set up in crt0.
+
 ### Rendering while the bus is busy
 
 To keep the CPU busy while waiting for I2C, the next frame is rasterized during the sensor read, so the display
@@ -72,7 +87,7 @@ interrupts and concurrency.
 flowchart TB
     subgraph MAIN["Main loop"]
         I["APP_IDLE"]
-        S["APP_START_READ<br/>trigger forced measurement"] --> WK["APP_SENSOR_WAKING<br/>wait for conversion<br/>issue BME280 read"]
+        S["APP_START_READ<br/>trigger forced measurement<br/>arm alarm 2"] --> WK["APP_SENSOR_WAKING<br/>wait for WOKEN_EVENT<br/>issue BME280 read"]
         WK --> R["rasterize frame"]
         R --> RD["APP_READING<br/>wait for STOP"]
         RD --> OK{"read OK?"}
@@ -83,7 +98,7 @@ flowchart TB
     end
 
     subgraph ISR 
-        SYS["SysTick IRQ, 1 kHz<br/>sample button, ch_select++<br/>page changed or 1 s elapsed:<br/>main_state = APP_START_READ"]
+        SYS["TIMER0 / GP18 IRQs<br/>set TICK, BTN, WOKEN events<br/>main loop: TICK or page changed<br/>main_state = APP_START_READ"]
         ISR["I2C ISR pumps TX, drains RX<br/>STOP sets bus DONE or ERROR"]
         DF["DMA feeds IC_DATA_CMD<br/>STOP sets bus DONE"]
     end
@@ -105,14 +120,17 @@ flowchart TB
 The sensor sleeps between samples. Each cycle writes `ctrl_meas` with the mode set to forced, waits out the
 measurement, then reads the data registers. The wait is the datasheet worst case for the configured oversampling
 (`1.25 + 2.3*T + 2.3*P + 0.575 + 2.3*H + 0.575` ms), worked out once in `bme280_set_config`, so 10 ms at 1x.
-The main loop sits in `APP_SENSOR_WAKING` and checks it against the SysTick counter instead of blocking.
+Instead of blocking, the main loop arms TIMER0 alarm 2 for that time and stays in `APP_SENSOR_WAKING` until the
+alarm posts `WOKEN_EVENT`.
 
 ### Button debouncing and RP2350-E9
 
-GP18 has no interrupt. The 1 kHz SysTick handler samples the pin into a 32-bit shift register and counts a press
-when one released sample is followed by 31 pressed ones (~31ms held low), on top of the RC debounce in hardware
-([Ganssle](https://www.ganssle.com/item/debouncing-switches-contacts-hardware.htm)). The page change is applied once
-the bus is idle.
+A falling edge on GP18 raises a GPIO interrupt, which masks itself and starts TIMER0 alarm 1. The alarm then fires
+every 1 ms and samples the pin into a 32-bit shift register, counting a press when one released sample is followed by
+16 pressed ones (~16ms held low), on top of the RC debounce in hardware
+([Ganssle](https://www.ganssle.com/item/debouncing-switches-contacts-hardware.htm)). If no press is confirmed within
+~30 samples, sampling stops and the edge interrupt is re-enabled. Otherwise it's re-enabled when the next read cycle
+starts. The page change is applied once the bus is idle, and with no button activity nothing samples the pin.
 
 The first version didn't work: with the button held the pin measured 1.53V, so presses did nothing, and noise during
 a display update chattered the edge detector instead. This is erratum E9:
